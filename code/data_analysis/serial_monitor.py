@@ -18,12 +18,26 @@ import datetime as dt
 SAMPLING_FREQ = 250
 MAX_PLOT_BUFF_SIZE = SAMPLING_FREQ*2                        # rx buff
 
+FILTER_HIGHT_CUT = 20
+FILTER_LOW_CUT = 5
+FILTER_ORDER = 9
+
 g_dataQueue = deque(maxlen=MAX_PLOT_BUFF_SIZE)  # rx buffer
 g_dataRxEvent = Event()                         # rx event
 g_dataWrittingEvent = Event()                   # writting event
 g_dataQueueLock = Lock()                        # lock for rx buffer
+g_lsColors = ['r', 'b', 'g', 'c', 'm', 'k']
 
-
+def checkDataFormat(arrValues):
+    bValid = True
+    try:
+        for d in arrValues:
+            float(d)
+    except ValueError as exp:
+        print exp
+        bValid = False
+    return bValid
+    
 def onBtRecord(event):
     '''
         handler when buttom is cliked
@@ -37,7 +51,7 @@ def onBtRecord(event):
         print("recording is started.")
 
 
-def dataRx(ser, 
+def dataRx(ser, nChannels,
            dataQueue, rxEvent, dataLock, 
            writeEvent, strFilePath):
   '''
@@ -65,9 +79,10 @@ def dataRx(ser,
           
       # add to plot buff
       values = strLine.split(",")
-      dataLock.acquire()
-      dataQueue.append(values)
-      dataLock.release()
+      if (len(values) >= nChannels and checkDataFormat(values) is True):
+          dataLock.acquire()
+          dataQueue.append(values)
+          dataLock.release()
       
   finally:
     # close file
@@ -76,64 +91,76 @@ def dataRx(ser,
         hFile.close()
 
 
-def onDraw(frameNum, dataQueue, dSamplingFreq, 
-           ax_t0, ax_t1, 
-           ax_f0, ax_f1,
-           ax_t0_filtered, ax_t1_filtered,
-           ax_f0_filtered, ax_f1_filtered,
+def onDraw(frameNum, dataQueue, nChannels,
+           dSamplingFreq, 
+           lsAx_raw,
+           lsAx_fft,
+           lsAx_filtered,
+           lsAx_fft_filtered,
            bt, dataLock, writtingEvent):
 
     # get a copy of data
+    lsData_raw = []
     dataLock.acquire()
-    arrCh0 = np.array([d[1] for d in dataQueue], dtype=np.float64)
-    arrCh1 = np.array([d[2] for d in dataQueue], dtype=np.float64)
+    for i in range(nChannels):
+        arrData = np.array([d[i+1] for d in dataQueue], dtype=np.float64)
+        lsData_raw.append(arrData)
     dataLock.release()
-
+    
     # update time-domain plot
-    nSamples = len(arrCh0)
-    ax_t0.set_data(range(nSamples), arrCh0)
-    ax_t1.set_data(range(nSamples), arrCh1)
+    for i, ax in enumerate(lsAx_raw):
+        arrData = lsData_raw[i]
+        ax.set_data(range(len(arrData) ), arrData)
 
     # filter data
-    arrCh0_filtered = sf.butter_lowpass_filter(arrCh0, 40,
-                                               dSamplingFreq, order=20)
-    arrCh1_filtered = sf.butter_lowpass_filter(arrCh1, 40, 
-                                               dSamplingFreq, order=20)
+    for i, ax in enumerate(lsAx_filtered):
+        arrData = lsData_raw[i]
+        arrData_filtered = sf.butter_lowpass_filter(arrData, 
+                                                    FILTER_HIGHT_CUT,
+                                                    dSamplingFreq,
+                                                    order=FILTER_ORDER)
 
-    ax_t0_filtered.set_data(range(nSamples), arrCh0_filtered)
-    ax_t1_filtered.set_data(range(nSamples), arrCh1_filtered)
+        ax.set_data(range(len(arrData_filtered) ), arrData_filtered)
 
     # update spectral plot
+    nSamples = len(lsData_raw[0])
     if (nSamples >= dSamplingFreq):
-      dResolution = dSamplingFreq*1.0/nSamples
-      nDCEnd = 5
-      arrFreqIndex = np.linspace(nDCEnd*dResolution,
-                                 dSamplingFreq/2.0, 
-                                 nSamples/2-nDCEnd)
-
-      arrCh0_f = abs(fftpack.fft(arrCh0) )/ (nSamples*1.0)
-      arrCh1_f = abs(fftpack.fft(arrCh1) )/ (nSamples*1.0)
-      ax_f0.set_data(arrFreqIndex, arrCh0_f[nDCEnd:nSamples/2])
-      ax_f1.set_data(arrFreqIndex, arrCh1_f[nDCEnd:nSamples/2])
-
-      arrCh0_f_t = abs(fftpack.fft(arrCh0_filtered) )/ (nSamples*1.0)
-      arrCh1_f_t = abs(fftpack.fft(arrCh1_filtered) )/ (nSamples*1.0)
-      ax_f0_filtered.set_data(arrFreqIndex, arrCh0_f_t[nDCEnd:nSamples/2])
-      ax_f1_filtered.set_data(arrFreqIndex, arrCh1_f_t[nDCEnd:nSamples/2])
-
-      
-
+        dResolution = dSamplingFreq*1.0/nSamples
+        nDCEnd = 5
+        arrFreqIndex = np.linspace(nDCEnd*dResolution,
+                                   dSamplingFreq/2.0, 
+                                   nSamples/2-nDCEnd)
+        for i, ax in enumerate(lsAx_fft):
+          arrFFT = fftpack.fft(lsData_raw[i])
+          arrNormalizedPower = np.abs(arrFFT)/nSamples*1.0
+          ax.set_data(arrFreqIndex, arrNormalizedPower[nDCEnd:nSamples/2])
+        
+        for i, ax in enumerate(lsAx_fft_filtered):
+            arrData = lsData_raw[i]
+            arrData_filtered = sf.butter_lowpass_filter(arrData,
+                                                        FILTER_HIGHT_CUT,
+                                                        dSamplingFreq,
+                                                        order=FILTER_ORDER)
+            arrFFT = fftpack.fft(arrData_filtered)
+            arrNormalizedPower = np.abs(arrFFT)/nSamples*1.0
+            ax.set_data(arrFreqIndex, arrNormalizedPower[nDCEnd:nSamples/2])
+        
     
     strLabel = "stop" if (writtingEvent.is_set()) else "record"
     bt.label.set_text(strLabel)
 
 
 def main():
+  if (len(sys.argv) != 3 ):
+      print "Usage: script_name port channel_number"
+      return
+      
   dataRxThread = None
   ser = None
   try:
     # setup 
     nPort = int(sys.argv[1])
+    nChannel = int(sys.argv[2])
     nBaudRate = 57600
     strDataPath = "../../data/"
     
@@ -144,16 +171,17 @@ def main():
     
     # create & start rx thread
     g_dataRxEvent.set()
-    dataRxThread = Thread(target=dataRx, args=(ser, g_dataQueue,
+    dataRxThread = Thread(target=dataRx, args=(ser, nChannel,
+                          g_dataQueue,
                           g_dataRxEvent, g_dataQueueLock, 
                           g_dataWrittingEvent, strDataPath) )
     dataRxThread.start()
 
     # set up plot
-    fig, axes = plt.subplots(nrows=4, ncols=2, squeeze=True)
+    fig, axes = plt.subplots(nrows=4, ncols=nChannel, squeeze=True)
 
     # setup look-and-feel
-    for nCol in range(2):
+    for nCol in xrange(nChannel):
       axes[0, nCol].set_xlim(0, MAX_PLOT_BUFF_SIZE)
       axes[0, nCol].set_ylim(-100, 1500)
       axes[0, nCol].set_xlabel('raw data')
@@ -172,37 +200,42 @@ def main():
       axes[3, nCol].set_xticks(range(0, SAMPLING_FREQ/2, 5) )
       axes[3, nCol].set_xlabel('FFT on filtered')
 
-
+    # create buttom
     plt.subplots_adjust(bottom=0.2)
-
-    # create buttom                  
     axBt = plt.axes([0.7, 0.05, 0.1, 0.075])
     btRecord = Button(axBt, 'record')
     btRecord.on_clicked(onBtRecord)
              
     # set axes for each plot
-    ax_t0, = axes[0, 0].plot([], [], color='r')
-    ax_t1, = axes[0, 1].plot([], [], color = 'b')
+    lsAx_raw = []
+    for i in xrange(nChannel):
+        ax, = axes[0, i].plot([], [], color=g_lsColors[i])
+        lsAx_raw.append(ax)
+        
+    lsAx_fft = []
+    for i in xrange(nChannel):
+        ax, = axes[1, i].plot([], [], color=g_lsColors[i])
+        lsAx_fft.append(ax)
 
-    ax_f0, = axes[1, 0].plot([], [], color='r')
-    ax_f1, = axes[1, 1].plot([], [], color='b')
-
-    ax_t0_filtered, = axes[2, 0].plot([], [], color='r')
-    ax_t1_filtered, = axes[2, 1].plot([], [], color = 'b')
-
-    ax_f0_filtered, = axes[3, 0].plot([], [], color='r')
-    ax_f1_filtered, = axes[3, 1].plot([], [], color='b')
-
+    lsAx_filtered = []
+    for i in xrange(nChannel):
+        ax, = axes[2, i].plot([], [], color=g_lsColors[i])
+        lsAx_filtered.append(ax)
     
+    lsAx_fft_filtered = []
+    for i in xrange(nChannel):
+        ax, = axes[3, i].plot([], [], color=g_lsColors[i])
+        lsAx_fft_filtered.append(ax)
 
 
     # create animation
     anim = animation.FuncAnimation(fig, onDraw, 
-                                   fargs=(g_dataQueue, SAMPLING_FREQ,
-                                          ax_t0, ax_t1, 
-                                          ax_f0, ax_f1, 
-                                          ax_t0_filtered, ax_t1_filtered,
-                                          ax_f0_filtered, ax_f1_filtered,
+                                   fargs=(g_dataQueue, nChannel,
+                                          SAMPLING_FREQ,
+                                          lsAx_raw,
+                                          lsAx_fft,
+                                          lsAx_filtered,
+                                          lsAx_fft_filtered,
                                           btRecord, 
                                           g_dataQueueLock,
                                           g_dataWrittingEvent), 

@@ -3,4 +3,7 @@ presentation/
 data/
 paper/
 code/reference/
+desktop.ini
 *.xmind
+*.pyc
+

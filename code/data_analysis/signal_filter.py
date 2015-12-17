@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-from scipy.signal import butter, lfilter, freqz
+from scipy.signal import butter, lfilter, freqz, filter_design, filtfilt
 import matplotlib.pyplot as plt
 
 def butter_bandpass(lowcut, highcut, fs, order=5):
@@ -37,6 +37,20 @@ def butter_highpass_filter(data, cutoff, fs, order=5):
     b, a = butter_highpass(cutoff, fs, order=order)
     y = lfilter(b, a, data)
     return y
+    
+def notch_filter(data, lowcut, highcut, fs, order=5, rs=10):
+
+    # Chebyshev notch filter centered on 50Hz
+    nyquist = fs / 2.0
+    b, a = filter_design.iirfilter(order, 
+                                   (lowcut/nyquist, highcut/nyquist),
+                                   rs=rs,
+                                   ftype='cheby2')
+
+    # filter the signal
+    arrFiltered = filtfilt(b, a, data)
+    
+    return arrFiltered
 
 
 if __name__ == "__main__":

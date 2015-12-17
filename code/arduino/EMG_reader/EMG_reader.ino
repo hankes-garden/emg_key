@@ -55,6 +55,7 @@ struct Olimexino328_packet
 #define TIMER2VAL (1024/(SAMPFREQ))       // Set 256Hz sampling frequency
 #define LED1  13
 #define CAL_SIG 9
+#define CHANNEL_NUM 3
 
 // Global constants and variables
 volatile unsigned char counter = 0;	  //Additional divider used to generate CAL_SIG
@@ -139,15 +140,13 @@ void Timer2_Overflow_ISR()
   // Toggle LED1 with ADC sampling frequency /2
   Toggle_LED1();
 
-  //Read the 6 ADC inputs and store current values in Packet
+  //Read the ADC inputs and print to serial
   Serial.print(millis() ); Serial.print(",");
-  for (int nCh = 0; nCh <= 1; ++nCh)
+  for (int nCh = 0; nCh <= (CHANNEL_NUM-1); ++nCh)
   {
 	  Serial.print(analogRead(nCh) );
-	  Serial.print( (nCh==1)?"\n":"," );
+	  Serial.print( (nCh==(CHANNEL_NUM-1) )?"\n":"," );
   }
-
-
 
   // Generate the CAL_SIGnal
   counter++;		// increment the devider counter

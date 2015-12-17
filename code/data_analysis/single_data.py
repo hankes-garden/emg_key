@@ -14,6 +14,7 @@ import pandas as pd
 import math
 import operator
 from scipy import stats
+from mpl_toolkits.axes_grid.anchored_artists import AnchoredText
 
 lsRGB = ['r', 'g', 'b']
 lsCMYK = ['c', 'm', 'y']
@@ -292,258 +293,305 @@ def findHeelStrike(arrData):
     """
 
 def normCrossCorrelation(arrData0, arrData1):
-    arrCrossCorr = sig.correlate(arrData0, arrData1, mode='full')
+    arrCrossCorr = np.correlate(arrData0, arrData1, mode='full')
     dDenominator = np.sqrt(np.dot(arrData0, arrData0) * \
-                           np.dot(arrData1, arrData1) ) 
-    return arrCrossCorr/dDenominator
+                           np.dot(arrData1, arrData1) )
+                           
+    arrNormCrossCorr = arrCrossCorr/dDenominator
+    nMaxIndex = np.argmax(abs(arrNormCrossCorr) )
+    dCorr = arrNormCrossCorr[nMaxIndex]
+    nLag = nMaxIndex - len(arrData0)
+    return dCorr, nLag, arrNormCrossCorr
     
     
     
 if __name__ == '__main__':
     
-    # data 
-    dSamplingFreq = 250.0
-    lsColumnNames = ['ch0', 'ch1']
-    
+    # ---- load data ----
     strWorkingDir = "../../data/feasibility/"
-    strFileName = "qy_1"
+    strFileName = "attacker_2"
     
+    dSamplingFreq = 235.0
+    lsColumnNames = ['ch0', 'ch1', 'ch2']
     
     dfData = loadData(strWorkingDir, strFileName, lsColumnNames)
     
-    # plot setup
-    nBasicFontSize = 16
+    # ---- plot setup----
+    lsColumns2Inspect = ['ch0','ch1', 'ch2']
+    
+    # look-and-feel
+    nBasicFontSize = 18
     strBasicFontName = "Times new Roman"
-    lsAxis2Inspect = ['ch0',]
-    lsColors = lsRGB*int(math.ceil(len(lsAxis2Inspect)/3.0) )
     
-    # raw data
-    bPlotRawData = True
-    nRawStart, nRawEnd = 0, -1
+    # plot raw 
+    bPlotRawData = False
+    tpYLim_raw = None
     
-    # fft on raw data
-    bPlotFFT = True
-    nFFTStart = nRawStart
-    nFFTEnd = nRawEnd
+    # plot fft on raw data
+    bPlotFFT = False
     nDCEnd = 2
-    tpFFTYLim = (0, 5)
+    tpYLim_fft = None
     
-    # filtered data
+    # plot filtered data
     bPlotFiltered = True
-    nLowCut = 5
-    nHighCut = 20
-    nOrder = 9
-    nShift = 50
+    tpYLim_filtered = None
     
-    # fft on filtered data
-    bPlotFFTonFiltered = True
-    tpFFTFilteredYLim = (0, 5)
+    # plot fft on filtered data
+    bPlotFFTonFiltered = False
+    tpYLim_fft_filtered = None
     
-    # statistics of filtered data
-    bPlotStat = False
+    # plot statistics of filtered data
+    bPlotStat = True
+    tpYLim_stat = None
     
+    # plot statistics of filtered data
+    bPlotCoding = True
+    tpYLim_coding = None
     
     # plot synchronized view
-    bPlotSyncView = False
+    bPlotSyncView = True
+    strSyncTitle = "".join([s+"_" for s in lsColumns2Inspect] )
     
     # bAnatation
     bAnatation = True
     
+    # ---- process data ----
+    # raw
+    nRawStart, nRawEnd = 0, -1
+    lsData_raw = []
+    for col in lsColumns2Inspect:
+        arrData = dfData[col].iloc[nRawStart: nRawEnd]
+        lsData_raw.append(arrData)
+        
+    # fft
+    nSamples_fft = len(lsData_raw[0])
+    dRes_fft = dSamplingFreq*1.0/nSamples_fft
+    lsData_fft = []
+    for arrData in lsData_raw:
+        arrFFT = fftpack.fft(arrData)
+        arrNormalizedPower = abs(arrFFT)/(nSamples_fft*1.0)
+        lsData_fft.append(arrNormalizedPower)
+        
+    # filtered
+    nLowCut, nHighCut = 5, 45
+    dPowerInterference = 50.0
+    nOrder = 9
+    nFilterShift = 50
     
-    # create fig 
+    lsData_filtered = []
+    for arrData in lsData_raw:
+        arrNoise = sf.notch_filter(arrData, dPowerInterference-1., 
+                                   dPowerInterference+1, 
+                                   dSamplingFreq, order=nOrder)
+        arrFiltered = arrData - arrNoise
+        lsData_filtered.append(arrFiltered)
+        
+    # fft on filtered
+    nSamples_fft_filtered = len(lsData_filtered[0])
+    dRes_fft_filtered = dSamplingFreq*1.0/nSamples_fft_filtered
+    lsData_fft_filtered = []
+    for arrFiltered in lsData_filtered:
+        arrFFT = fftpack.fft(arrFiltered)
+        arrNormalizedPower = abs(arrFFT)/(nSamples_fft_filtered*1.0)
+        lsData_fft_filtered.append(arrNormalizedPower)
+        
+    # statistics of data
+    nWndSize = dSamplingFreq*0.5
+    lsData_stat = []
+    for arrData in lsData_filtered:
+        arrStat = pd.rolling_mean(arrData, window=nWndSize, 
+                                  min_periods=1)
+        lsData_stat.append(arrStat)
+        
+    # coding
+    lsData_coding = []
+    for arrData in lsData_stat:
+        arrStat = pd.rolling_quantile(arrData, window=nWndSize,
+                                      quantile=0.5,
+                                      min_periods=1)
+        lsData_coding.append(arrStat)
+        
+    # correlation
+    if (bAnatation is True):
+        lsCorr_raw = []
+        for i in xrange(len(lsData_raw) ):
+            dCorr, p = stats.pearsonr(lsData_raw[i],
+                                      lsData_raw[(i+1)%len(lsData_filtered)])
+            lsCorr_raw.append(dCorr)
+        print "lsCorr_raw", lsCorr_raw
+            
+        lsCorr_filtered = []
+        for i in xrange(len(lsData_filtered) ):
+            dCorr, p = stats.pearsonr( \
+                lsData_filtered[i], 
+                lsData_filtered[(i+1)%len(lsData_filtered)])
+            lsCorr_filtered.append(dCorr)
+        print "lsCorr_filtered: ", lsCorr_filtered
+                
+        lsCorr_stat = []
+        for i in xrange(len(lsData_stat) ):
+            dCorr, p = stats.pearsonr( \
+                lsData_stat[i], 
+                lsData_stat[(i+1)%len(lsData_stat)])
+            lsCorr_stat.append(dCorr)
+        print "lsCorr_stat", lsCorr_stat
+            
+            
+                
+    # ---- plot ---- 
     nRows = np.sum([bPlotRawData, bPlotFFT, bPlotFiltered, 
-                    bPlotFFTonFiltered, bPlotStat] )
-    nCols= len(lsAxis2Inspect) if bPlotSyncView is False else 1
+                    bPlotFFTonFiltered, bPlotStat, bPlotCoding] )
+    nCols= len(lsColumns2Inspect) if bPlotSyncView is False else 1
     fig, axes = plt.subplots(nrows=nRows, ncols=nCols, squeeze=False)
+    
     nCurrentRow = 0
     
     # plot raw data
-    arrComp0, arrComp1 = None, None
     if(bPlotRawData is True):
-        for i, col in enumerate(lsAxis2Inspect):
-            arrData = dfData[col].iloc[nRawStart:nRawEnd]
+        for i, arrData in enumerate(lsData_raw):
             nRowID = nCurrentRow
             nColID = i if bPlotSyncView is False else 0
             dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            axes[nRowID, nColID].plot(arrData, color=lsColors[i], 
-                                      alpha=dAlpha)
-            axes[nRowID, nColID].set_xlabel( (col if bPlotSyncView is False \
-                else ("".join(lsAxis2Inspect) ) ) +"(raw)" )
-            axes[nRowID, nColID].set_ylim(0, 1000)
+            nVerticalShift = 0 if bPlotSyncView is False else (400*i)
+            axes[nRowID, nColID].plot(arrData-nVerticalShift, 
+                                      color=lsRGB[i], 
+                                      alpha=dAlpha,
+                                      label=lsColumns2Inspect[i])
+            axes[nRowID, nColID].set_xlabel(\
+                (lsColumns2Inspect[i] if bPlotSyncView is False \
+                else  strSyncTitle +"(raw)" ) )
+            if (tpYLim_raw is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_raw[0], tpYLim_raw[1])
             axes[nRowID, nColID].grid('on')
             
-            if (i == 0):
-                arrComp0 = arrData
-            elif (i == 1):
-                arrComp1 = arrData
-            else:
-                pass
-            
-        if(bPlotSyncView):
-            arrNormCrossCorr = normCrossCorrelation(arrComp0, arrComp1)
-            nMaxIndex = np.argmax(arrNormCrossCorr)
-            dCorr = arrNormCrossCorr[nMaxIndex]
-            nLag = nMaxIndex - len(arrComp0)
-            axes[nRowID, nColID].annotate("correlation=%.2f, lag=%d"%\
-                                          (dCorr, nLag),
-                                          xy=(0.6,1.0),
-                                          textcoords='axes fraction')
         nCurrentRow += 1
         
     # plot FFT on raw
     if (bPlotFFT is True):
-        arrComp0, arrComp1 = None, None
-        for i, col in enumerate(lsAxis2Inspect):
-            arrData = dfData[col].iloc[nFFTStart:nFFTEnd]
-            nSamples = len(arrData)
-            arrFFT = fftpack.fft(arrData)
-            arrNormalizedPower = abs(arrFFT)/(nSamples*1.0)
-            arrNorPower_sm = pd.rolling_mean(arrNormalizedPower, 5, 1)
-            dResolution = dSamplingFreq*1.0/nSamples
-            arrFreqIndex = np.linspace(nDCEnd*dResolution, 
+        for i, arrNormalizedPower in enumerate(lsData_fft):
+            arrFreqIndex = np.linspace(nDCEnd*dRes_fft, 
                                        dSamplingFreq/2.0, 
-                                       nSamples/2-nDCEnd)
+                                       nSamples_fft/2-nDCEnd)
                                        
             nRowID = nCurrentRow
             nColID = i if bPlotSyncView is False else 0
             dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+            nVerticalShift = 0 if bPlotSyncView is False else (10*i)
             axes[nRowID, nColID].plot(arrFreqIndex,
-                                      arrNormalizedPower[nDCEnd:nSamples/2],
-                                      color=lsColors[i],
-                                      alpha=dAlpha)
+                arrNormalizedPower[nDCEnd:nSamples_fft/2]-nVerticalShift,
+                color=lsRGB[i], alpha=dAlpha)
             axes[nRowID, nColID].set_xticks(range(0, 
                                             int(dSamplingFreq/2), 10) )
-            axes[nRowID, nColID].set_xlabel( (col if bPlotSyncView is False \
-                else ("".join(lsAxis2Inspect) ) ) +"(fft)" )
-            axes[nRowID, nColID].set_ylim(tpFFTYLim)
-            
-            if (i == 0):
-                arrComp0 =  arrNormalizedPower[nDCEnd:nSamples/2]
-            elif (i == 1):
-                arrComp1 =  arrNormalizedPower[nDCEnd:nSamples/2]
-            else:
-                pass
-            
-        if(bPlotSyncView):
-            dCorr, dPval = stats.pearsonr(arrComp0, arrComp1)
-            axes[nRowID, nColID].annotate("correlation=%.2f"%dCorr,
-                                          xy=(0.6,1.0),
-                                          textcoords='axes fraction')
+            axes[nRowID, nColID].set_xlabel( \
+                (lsColumns2Inspect[i]  if bPlotSyncView is False \
+                else strSyncTitle +"(fft)" ) )
+            if (tpYLim_fft is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_fft[0], tpYLim_fft[1])
+            axes[nRowID, nColID].grid('on')
+
         nCurrentRow += 1
             
     # plot filtered data
-    if (bPlotFiltered is True):
-        for i, col in enumerate(lsAxis2Inspect):
-            arrData = dfData[col].iloc[nRawStart:nRawEnd]
-            arrFiltered= sf.butter_lowpass_filter(arrData, nHighCut,
-                                                   dSamplingFreq,
-                                                   order=nOrder)
+    if(bPlotFiltered is True):
+        for i, arrFiltered in enumerate(lsData_filtered):
             nRowID = nCurrentRow
             nColID = i if bPlotSyncView is False else 0
             dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            axes[nRowID, nColID].plot(arrFiltered[nShift:], color=lsColors[i],
-                                      alpha = dAlpha)
-            axes[nRowID, nColID].set_xlabel( (col if bPlotSyncView is False \
-                else ("".join(lsAxis2Inspect) ) ) +"(filtered)" )
-#            axes[nRowID, nColID].set_ylim(300, 800)
-            if (i == 0):
-                arrComp0 = arrFiltered[100:]
-            elif (i == 1):
-                arrComp1 = arrFiltered[100:]
-            else:
-                pass
+            nVerticalShift = 0 if bPlotSyncView is False else (80*i)
+            axes[nRowID, nColID].plot(\
+                arrFiltered[nFilterShift:]-nVerticalShift,
+                color=lsRGB[i], alpha=dAlpha)
+            axes[nRowID, nColID].set_xlabel(\
+                (lsColumns2Inspect[i] if bPlotSyncView is False \
+                else strSyncTitle +"(filtered)" ) )
+            if (tpYLim_filtered is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_filtered[0],
+                                              tpYLim_filtered[1])
+            axes[nRowID, nColID].grid('on')
             
-        if(bPlotSyncView):
-            arrNormCrossCorr = normCrossCorrelation(arrComp0, arrComp1)
-            nMaxIndex = np.argmax(arrNormCrossCorr)
-            dCorr = arrNormCrossCorr[nMaxIndex]
-            nLag = nMaxIndex - len(arrComp0)
-            axes[nRowID, nColID].annotate("correlation=%.2f, lag=%d"%\
-                                          (dCorr, nLag),
-                                          xy=(0.6,1.0),
-                                          textcoords='axes fraction')
+            if(bAnatation is True):
+                axes[nRowID, nColID].annotate(\
+                    'corr%d%d = %.2f'% \
+                    (i, (i+1)%len(lsColumns2Inspect), lsCorr_filtered[i]), 
+                    xy= (.5+i*0.2, .1) if bPlotSyncView else (.7, .1), 
+                    xycoords='axes fraction',
+                    horizontalalignment='center',
+                    verticalalignment='center')
         nCurrentRow += 1
         
     # plot FFT on filtered data
     if (bPlotFFTonFiltered is True):
-        for i, col in enumerate(lsAxis2Inspect):
-            arrData = dfData[col].iloc[nFFTStart:nFFTEnd]
-            arrFiltered= sf.butter_lowpass_filter(arrData, nHighCut,
-                                                   dSamplingFreq,
-                                                   order=nOrder)
-            nSamples = len(arrFiltered)
-            arrFFT = fftpack.fft(arrFiltered[nShift:])
-            arrNormalizedPower = abs(arrFFT)/(nSamples*1.0)
-            arrNorPower_sm = pd.rolling_mean(arrNormalizedPower, 5, 1)
-            dResolution = dSamplingFreq*1.0/nSamples
-            arrFreqIndex = np.linspace(nDCEnd*dResolution, 
+        for i, arrNormalizedPower in enumerate(lsData_fft_filtered):
+            arrFreqIndex = np.linspace(nDCEnd*dRes_fft_filtered, 
                                        dSamplingFreq/2.0, 
-                                       nSamples/2-nDCEnd)
+                                       nSamples_fft_filtered/2-nDCEnd)
                                        
             nRowID = nCurrentRow
             nColID = i if bPlotSyncView is False else 0
             dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+            nVerticalShift = 0 if bPlotSyncView is False else (5*i)
             axes[nRowID, nColID].plot(arrFreqIndex,
-                                      arrNormalizedPower[nDCEnd:nSamples/2],
-                                      color=lsColors[i], alpha=dAlpha)
+                arrNormalizedPower[nDCEnd: nSamples_fft_filtered/2.0]-nVerticalShift,
+                color=lsRGB[i], alpha=dAlpha)
             axes[nRowID, nColID].set_xticks(range(0, 
                                             int(dSamplingFreq/2), 10) )
-            axes[nRowID, nColID].set_xlabel( (col if bPlotSyncView is False \
-                else ("".join(lsAxis2Inspect) ) ) +"(fft@filtered)" )
-            axes[nRowID, nColID].set_xlim(0, nHighCut)
-            axes[nRowID, nColID].set_ylim(tpFFTFilteredYLim)
-
-            if (i == 0):
-                arrComp0 = arrNormalizedPower[nDCEnd:nSamples/2]
-            elif (i == 1):
-                arrComp1 = arrNormalizedPower[nDCEnd:nSamples/2]
-            else:
-                pass
+            axes[nRowID, nColID].set_xlabel( \
+                (lsColumns2Inspect[i]  if bPlotSyncView is False \
+                else strSyncTitle +"(fft@filtered)") )
+            if (tpYLim_fft_filtered is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_fft_filtered[0], 
+                                              tpYLim_fft_filtered[1])
+            axes[nRowID, nColID].grid('on')
         nCurrentRow += 1
     
-    # plot statistics of filtered data
-    if (bPlotStat is True):
-        for i, col in enumerate(lsAxis2Inspect):
-                arrData = dfData[col].iloc[nRawStart:nRawEnd]
-                arrFiltered= sf.butter_lowpass_filter(arrData, nHighCut,
-                                                       dSamplingFreq,
-                                                       order=nOrder)[nShift:]
-                arrStat = pd.rolling_mean(arrFiltered, window=100,
-                                          min_periods=1)
-                nRowID = nCurrentRow
-                nColID = i if bPlotSyncView is False else 0
-                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-                                                           
-                axes[nRowID, nColID].plot(arrStat,
-                                          color=lsColors[i],
-                                          alpha=dAlpha)
-                axes[nRowID, nColID].set_xlabel( (col \
-                    if bPlotSyncView is False \
-                    else ("".join(lsAxis2Inspect) ) ) +"(stats)" )
-    #            axes[nRowID, nColID].set_ylim(300, 800)
-                if (i == 0):
-                    arrComp0 = arrFiltered[nShift:]
-                elif (i == 1):
-                    arrComp1 = arrFiltered[nShift:]
-                else:
-                    pass
+    
+    # plot stat data
+    if(bPlotStat is True):
+        for i, arrStat in enumerate(lsData_stat):
+            nRowID = nCurrentRow
+            nColID = i if bPlotSyncView is False else 0
+            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+            nVerticalShift = 0 if bPlotSyncView is False else (50*i)
+            axes[nRowID, nColID].plot(arrStat-nVerticalShift, 
+                                      color=lsRGB[i], 
+                                      alpha=dAlpha)
+            axes[nRowID, nColID].set_xlabel(\
+                (lsColumns2Inspect[i] if bPlotSyncView is False \
+                else strSyncTitle +"(stat)" ) )
+            if (tpYLim_stat is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_stat[0], tpYLim_stat[1])
+            axes[nRowID, nColID].grid('on')
             
-        if(bPlotSyncView):
-            arrNormCrossCorr = normCrossCorrelation(arrComp0, arrComp1)
-            nMaxIndex = np.argmax(arrNormCrossCorr)
-            dCorr = arrNormCrossCorr[nMaxIndex]
-            nLag = nMaxIndex - len(arrComp0)
-            axes[nRowID, nColID].annotate("correlation=%.2f, lag=%d"%\
-                                          (dCorr, nLag),
-                                          xy=(0.6,1.0),
-                                          textcoords='axes fraction')
+            if(bAnatation is True):
+                axes[nRowID, nColID].annotate(\
+                    'corr%d%d = %.2f'% \
+                    (i, (i+1)%len(lsColumns2Inspect), lsCorr_stat[i]), 
+                    xy= (.5+i*0.2, .1) if bPlotSyncView else (.7, .1), 
+                    xycoords='axes fraction',
+                    horizontalalignment='center',
+                    verticalalignment='center')
         nCurrentRow += 1
-                                                 
+        
+        
+    # plot coding data
+    if(bPlotCoding is True):
+        for i, arrCoding in enumerate(lsData_coding):
+            nRowID = nCurrentRow
+            nColID = i if bPlotSyncView is False else 0
+            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+            nVerticalShift = 0 if bPlotSyncView is False else (50*i)
+            axes[nRowID, nColID].plot(arrCoding-nVerticalShift, 
+                                      color=lsRGB[i], 
+                                      alpha=dAlpha)
+            axes[nRowID, nColID].set_xlabel(\
+                (lsColumns2Inspect[i] if bPlotSyncView is False \
+                else strSyncTitle +"(coding)" ) )
+            if (tpYLim_coding is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_coding[0],
+                                              tpYLim_coding[1])
+            axes[nRowID, nColID].grid('on')
+        nCurrentRow += 1
     
-    
-    # set fig look        
-    fig.suptitle(strFileName, fontname=strBasicFontName,
-                 fontsize=nBasicFontSize)
     plt.tight_layout()
     plt.show()
         
