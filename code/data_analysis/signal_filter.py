@@ -39,7 +39,6 @@ def butter_highpass_filter(data, cutoff, fs, order=5):
     return y
     
 def notch_filter(data, lowcut, highcut, fs, order=5, rs=10):
-
     # Chebyshev notch filter centered on 50Hz
     nyquist = fs / 2.0
     b, a = filter_design.iirfilter(order, 

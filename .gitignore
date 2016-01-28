@@ -3,7 +3,7 @@ presentation/
 data/
 paper/
 code/reference/
+code/data_analysis/*.pyc
 desktop.ini
 *.xmind
 *.pyc
-
