@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-This script provides basic functions for analyzing a single data,
-aslo, in its main body, it perform measurement on single data
+This script provides basic functions for analyzing a single data.
 
 @author: jason
 """
 import source_encoding as encoder
+
 
 import signal_filter as sf
 import numpy as np
@@ -14,7 +14,6 @@ import scipy.signal as sig
 import matplotlib.pyplot as plt
 import pandas as pd
 import math
-import operator
 from scipy import stats
 from collections import deque
 import itertools
@@ -29,13 +28,15 @@ RECTIFY_RMS = 'RMS'
 MEAN_FREQ = "mean_freq"
 MEDIAN_FREQ = "median_freq"
 
-def computeMatchingRate(arrCode1, arrCode2):
-    nMatchCount = 0
-    nMinLen = min(len(arrCode1), len(arrCode2) )
-    for i, j in zip(arrCode1[:nMinLen], arrCode2[:nMinLen]):
-        if i == j:
-            nMatchCount += 1
-    return nMatchCount*1.0/len(arrCode1)
+
+dcSegments = {\
+'ww_20160120_220524': [(500, 3700), (5100, 8300), (10000, 12400)],
+'ww_20160120_220358': [(650, 4000), (5100, 8800), (10000, 13500)],
+'ww_20160120_220245': [(900, 4300), (5100, 8300), (9500, 12700)],
+'ww_20160120_220126': [(750, 4600), (5800, 9500), (11100, 16000)],
+'ww_20160120_220019': [(670, 3080), (4100, 7200), (8700, 12200)] }
+
+
 
 def computeMeanFrequency(arrPSD, arrFreqIndex):
     dMeanFreq = np.sum(arrPSD.dot(arrFreqIndex))*1.0 / np.sum(arrPSD)
@@ -62,9 +63,15 @@ def computeMedianFrequency(arrPSD, arrFreqIndex):
     
 
 def RMS(arrData):
+    """
+        return the root mean square of data
+    """
     return math.sqrt( np.sum(arrData**2.0)/len(arrData) ) 
 
 def rectifyEMG(arrData, dSamplingFreq, dWndDuration=0.245, method='RMS'):
+    """
+        change the negative value of EMG to positive values
+    """
     nWndSize = int(dWndDuration * dSamplingFreq)
     arrRectified = None
     
@@ -100,6 +107,8 @@ def findEMGSegments(arrData, dSamplingFreq,
         divides signal into segments according to std
         
     """
+    return [(500, 3700), (5100, 8300), (10000, 12400)]    
+    
     nWndSize = int(dWndDuration * dSamplingFreq)
     nDistance = int(math.ceil(dDiscontinuousDuration * dSamplingFreq) )
     nMinSegmentSize = int(dMinSegmentDuration*dSamplingFreq)
@@ -194,91 +203,12 @@ def loadData(strWorkingDir, strFileName, lsColumnNames, strFileExt = '.txt'):
     dfData_filtered = dfData[lsMask]
 
     return dfData_filtered
-
-def computeModulus(dfXYZ):
-    """
-    Given a 3-column dataframe, computes the modulus for each row
-
-    Parameters
-    ----------
-    dfXYS: 
-        data frame containing X, Y, Z data
-
-    Returns
-    ----------
-    array of modulus
-    """
-    return (np.sqrt(np.power(dfXYZ.iloc[:,0], 2.0) +
-                   np.power(dfXYZ.iloc[:,1], 2.0) +
-                   np.power(dfXYZ.iloc[:,2], 2.0) )).values
-
-def computeGravity(dfXYZ, nStart=0, nEnd=5000):
-    """
-        Given a 3-column acc data in some coordinates, computes the projection
-        of gravity on each axis via averaging over stable state.
-
-        Parameters
-        ----------
-        dfXYZ: 
-            3-column ACC data frame
-        nStart: 
-            the start point of stable state
-        nEnd: 
-            the end point of stable state
-
-        Returns
-        ----------
-        projection of gravity on X, Y, Z axies, and gravity, respectively
-    """
-    dAvgGX = np.average(dfXYZ.iloc[nStart:nEnd, 0])
-    dAvgGY = np.average(dfXYZ.iloc[nStart:nEnd, 1])
-    dAvgGZ = np.average(dfXYZ.iloc[nStart:nEnd, 2])
-    return dAvgGX, dAvgGY, dAvgGZ, math.sqrt(dAvgGX**2+dAvgGY**2+dAvgGZ**2)
-
-def removeGravity(dfXYZ, nStart=0, nEnd=1000):
-    """
-        This function compute the gravity via stable states,
-        the remove it from data
-#
-        Parameteres
-        -----------
-        dfXYZ: 
-            3-column ACC data frame
-        nStart: 
-            start point of stable state
-        nEnd: 
-            end point of stable state
-
-        Returns
-        ----------
-        a 3-column ACC data frame without gravity
-    """
-    # compute gravity
-    dAvgGX, dAvgGY, dAvgGZ, dGravity = computeGravity(dfXYZ, nStart, nEnd)
-    srGravity = pd.Series([dAvgGX, dAvgGY,dAvgGZ], index=dfXYZ.columns)
-    dfXYZ_noG = dfXYZ - srGravity
-
-    return dfXYZ_noG
     
-    
-def findHeelStrike(arrData):
-    """
-        Given the accelerometer reading, find the heel-strike event
-        
-        Parameters
-        --------
-        arrData:
-            accelerometers data
-            
-        Returns
-        --------
-        arrIndex:
-            index of heel-strike event
-        arrAccMagnitude
-            acc magnitude
-    """
 
 def normalizedCrossCorr(arrData0, arrData1):
+    """
+        Compute the normalized cross correlation
+    """
     arrCrossCorr = np.correlate(arrData0, arrData1, mode='full')
     dDenominator = np.sqrt(np.dot(arrData0, arrData0) * \
                            np.dot(arrData1, arrData1) )
@@ -288,34 +218,6 @@ def normalizedCrossCorr(arrData0, arrData1):
     dCorr = arrNormCrossCorr[nMaxIndex]
     nLag = nMaxIndex - len(arrData0)
     return dCorr, nLag, arrNormCrossCorr
-    
-def plotFrequencyBand(lsData, dSamplingFreq, 
-                      dBandWidth=10.0, nOrder=7,
-                      lsColor=['r', 'g', 'b', 'c', 'k', 'm'] ):
-    dNyquistFreq = dSamplingFreq/2.0
-    for dStartFreq in np.arange(3.0, 49.0, dBandWidth):
-        dEndFreq = min(dStartFreq + dBandWidth, 49.0)
-        fig, axes = plt.subplots(nrows=len(lsData), ncols=1, squeeze=False)
-        for i, arrData in enumerate(lsData):
-            arrFiltered = sf.notch_filter(arrData, dStartFreq,
-                                          dEndFreq, dSamplingFreq,
-                                          order=nOrder)
-            axes[i, 0].plot(arrFiltered[50:-50], color=lsColor[i])
-            axes[i, 0].grid("on")
-        plt.suptitle("%.1f~%.1f Hz" %(dStartFreq, dEndFreq) )
-        plt.tight_layout()
-        
-    for dStartFreq in np.arange(52, dNyquistFreq, dBandWidth):
-        dEndFreq = min(dStartFreq + dBandWidth, dNyquistFreq)
-        fig, axes = plt.subplots(nrows=len(lsData), ncols=1, squeeze=False)
-        for i, arrData in enumerate(lsData):
-            arrFiltered = sf.notch_filter(arrData, dStartFreq,
-                                          dEndFreq, dSamplingFreq,
-                                          order=nOrder)
-            axes[i, 0].plot(arrFiltered[50:-50], color=lsColor[i])
-            axes[i, 0].grid("on")
-        plt.suptitle("%.1f~%.1f Hz" %(dStartFreq, dEndFreq) )
-        plt.tight_layout()
         
 def slidingCorrelation(arrData1, arrData2, nWndSize):
     """
@@ -333,10 +235,13 @@ def slidingCorrelation(arrData1, arrData2, nWndSize):
     return dTotalCorr
      
      
-def main():
+if __name__ == '__main__':
+    """
+        examine single data
+    """
     # ---- load data ----
     strWorkingDir = "../../data/feasibility/"
-    strFileName = "ww_20160120_220358"
+    strFileName = "ww_20160120_220019"
     
     dSamplingFreq = 236.0
     lsColumnNames = ['ch0', 'ch1', 'ch2']
@@ -346,58 +251,18 @@ def main():
     # ---- setup----
     lsColumns2Inspect = ['ch0','ch1', 'ch2']
     
-    # look-and-feel
-    nFontSize = 18
-    strFontName = "Times new Roman"
-    
-    # frequency band
-    bPlotFrequencyBand = False
-    dBandWidth = 10.0
-    
-    # plot raw 
-    bPlotRawData = True
+#==============================================================================
+# process data
+#==============================================================================
+    # ---- raw ----
     nRawStart, nRawEnd = 0, -1
-    tpYLim_raw = None
-    
-    # plot fft on raw data
-    bPlotFFT = False
-    nLowCut, nHighCut = 5, 45
-    dPowerInterference = 50.0
-    nFilterOrder = 9
-    nFilterShift = int(0.5 *dSamplingFreq)
-    nDCEnd = 2
-    tpYLim_fft = None
-    
-    # plot filtered data
-    bPlotFiltered = False
-    tpYLim_filtered = None
-    
-    # plot fft on filtered data
-    bPlotFFTonFiltered = False
-    tpYLim_fft_filtered = None
-    
-    # plot rectified data based on filtered data
-    bPlotRectified = True
-    nRectShift = 50
-    tpYLim_rectified = (0, 60)
-    
-    # plot synchronized view
-    bPlotSyncView = False
-    strSyncTitle = "".join([s+"_" for s in lsColumns2Inspect] )
-    
-    # bAnatation
-    bAnatation = True
-    tpAnatationXYCoor = (.75, .9)
-    
-    
-    # ---- process data ----
-    # raw
     lsData_raw = []
     for col in lsColumns2Inspect:
         arrData = dfData[col].iloc[nRawStart: nRawEnd]
         lsData_raw.append(arrData)
         
-    # fft
+    # ---- fft ----
+    nDCEnd = 2
     nSamples_fft = len(lsData_raw[0])
     dRes_fft = dSamplingFreq*1.0/nSamples_fft
     lsData_fft = []
@@ -406,7 +271,11 @@ def main():
         arrPSD = np.sqrt(abs(arrFFT)**2.0/(nSamples_fft*1.0))
         lsData_fft.append(arrPSD)
         
-    # filtered
+    # ---- filtered ----
+    nLowCut, nHighCut = 5, 45
+    dPowerInterference = 50.0
+    nFilterOrder = 9
+    nFilterShift = int(0.5 *dSamplingFreq)
     lsData_filtered = []
     for arrData in lsData_raw:
         # remove power line inteference
@@ -422,7 +291,7 @@ def main():
                                                 order=nFilterOrder)
         lsData_filtered.append(arrFiltered[nFilterShift:])
         
-    # fft on filtered
+    # ---- fft on filtered ----
     nSamples_fft_filtered = len(lsData_filtered[0])
     dRes_fft_filtered = dSamplingFreq*1.0/nSamples_fft_filtered
     lsData_fft_filtered = []
@@ -431,8 +300,8 @@ def main():
         arrPSD = np.sqrt(abs(arrFFT)**2.0/(nSamples_fft_filtered*1.0))
         lsData_fft_filtered.append(arrPSD)
         
-    # rectify data
-    dRectDuration = 1.3
+    # ---- rectify data ----
+    dRectDuration = 0.5
     lsData_rectified = []
     for arrData in lsData_filtered:
         arrRect = rectifyEMG(arrData, dSamplingFreq, 
@@ -441,26 +310,25 @@ def main():
         lsData_rectified.append(arrRect)
         
     # statistics of data
-    nCodingWndSize = int(0.7*dSamplingFreq)
+    nCodingWndSize = int(0.5*dSamplingFreq)
     dcData_stat = {}
-    lsSegments = findEMGSegments(lsData_rectified[1], 
-                                 dSamplingFreq) # segment w.r.t. pay client
+    lsSegments = dcSegments[strFileName]
     for i in xrange(len(lsData_rectified)):
         arrData1 = lsData_rectified[i]
         arrData2 = lsData_rectified[(i+1)%len(lsData_rectified)]
         
         dTotalCorr = 0.0
-        for nStart, nEnd in lsSegments:
+        for nStart, nEnd in lsSegments[:]:
             arrSeg1 = arrData1[nStart: nEnd]
             arrSeg2 = arrData2[nStart: nEnd]
             dCorr = slidingCorrelation(arrSeg1, arrSeg2,
                                        nWndSize=nCodingWndSize)
             dTotalCorr += abs(dCorr)
-        dTotalCorr = dTotalCorr / len(lsSegments)
+        dTotalCorr = dTotalCorr / len(lsSegments[:])
         dcData_stat["%d-%d" % (i, (i+1)%len(lsData_rectified)) ] = dTotalCorr
         
         
-    print "statistics: \n", dcData_stat, "\n"
+    print "correlation: \n", dcData_stat, "\n"
         
     # coding
     bCoding = False
@@ -468,29 +336,62 @@ def main():
         lsData_coding = []
         for arrData in lsData_rectified:
             # segment
-            lsSegments = findEMGSegments(arrData, dSamplingFreq,
-                                         dDiscontinuousDuration=2.5)
+            lsSegments = dcSegments[strFileName]
+            
             # coding
-            lsTotalCode = []
+            lsSegmentCode = []
             for nStart, nEnd in lsSegments:
                 arrEMGSeg = arrData[nStart:nEnd]
                 lsCode = encoder.shapeEncoding(arrEMGSeg, nCodingWndSize)
-                lsTotalCode += lsCode
-            print lsTotalCode
-            lsData_coding.append(np.array(lsTotalCode) )
+                lsSegmentCode += lsCode
+            lsData_coding.append(np.array(lsSegmentCode) )
             
         # coding performance
         for i in xrange(len(lsData_coding) ):
             arrCode1 = lsData_coding[i]
             arrCode2 = lsData_coding[(i+1) % len(lsData_coding) ]
-            dMatchingRate = computeMatchingRate(arrCode1, arrCode2)
-            print("matchingRate(%d, %d)=%.2f" % \
-                    (i, (i+1) % len(lsData_coding), dMatchingRate) )
-        
-            
+            dBER = encoder.computeBER(arrCode1, arrCode2)
+            print("BER(%d, %d)=%.2f" % \
+                    (i, (i+1) % len(lsData_coding), dBER) )
                 
-    # ---- plot ---- 
+#==============================================================================
+# plot
+#==============================================================================
+    # look-and-feel
+    nFontSize = 18
+    strFontName = "Times new Roman"
     
+    # plot raw 
+    bPlotRawData = False
+    tpYLim_raw = None
+    
+    # plot fft on raw data
+    bPlotFFT = False
+    tpYLim_fft = None
+    
+    # plot filtered data
+    bPlotFiltered = False
+    tpYLim_filtered = None
+    
+    # plot fft on filtered data
+    bPlotFFTonFiltered = False
+    tpYLim_fft_filtered = None
+    
+    # plot rectified data based on filtered data
+    bPlotRectified = True
+    bPlotAuxiliaryLine = True
+    nRectShift = 50
+    tpYLim_rectified = None
+    
+    # plot synchronized view
+    bPlotSyncView = True
+    strSyncTitle = "".join([s+"_" for s in lsColumns2Inspect] )
+    
+    # bAnatation
+    bAnatation = True
+    tpAnatationXYCoor = (.75, .9)
+    
+    # create axes
     nRows = np.sum([bPlotRawData, bPlotFFT, bPlotFiltered, 
                     bPlotFFTonFiltered, bPlotRectified] )
     nCols= len(lsColumns2Inspect) if bPlotSyncView is False else 1
@@ -498,7 +399,7 @@ def main():
     
     nCurrentRow = 0
     
-    # plot raw data
+    # ---- plot raw data -----
     if(bPlotRawData is True):
         for i, arrData in enumerate(lsData_raw):
             nRowID = nCurrentRow
@@ -518,7 +419,7 @@ def main():
             
         nCurrentRow += 1
         
-    # plot FFT on raw
+    # ---- plot FFT ----
     if (bPlotFFT is True):
         for i, arrPSD in enumerate(lsData_fft):
             arrFreqIndex = np.linspace(nDCEnd*dRes_fft, 
@@ -543,7 +444,7 @@ def main():
 
         nCurrentRow += 1
             
-    # plot filtered data
+    # ---- plot filtered data ----
     if(bPlotFiltered is True):
         for i, arrFiltered in enumerate(lsData_filtered):
             nRowID = nCurrentRow
@@ -563,7 +464,7 @@ def main():
             axes[nRowID, nColID].grid('on')
         nCurrentRow += 1
         
-    # plot FFT on filtered data
+    # ---- plot FFT on filtered data ----
     if (bPlotFFTonFiltered is True):
         for i, arrPSD in enumerate(lsData_fft_filtered):
             arrFreqIndex = np.linspace(nDCEnd*dRes_fft_filtered, 
@@ -590,83 +491,52 @@ def main():
         nCurrentRow += 1
     
     
-    # plot rectified data
+    # ---- plot rectified data ----
     if(bPlotRectified is True):
         for i, arrData in enumerate(lsData_rectified):
             nRowID = nCurrentRow
             nColID = i if bPlotSyncView is False else 0
             dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            nVerticalShift = 0 if bPlotSyncView is False else (10*i)
-            axes[nRowID, nColID].plot(arrData-nVerticalShift,
+            nVerticalShift = 0 if bPlotSyncView is False else (2*i)
+            axes[nRowID, nColID].plot(arrData+nVerticalShift,
                                       color=lsRGB[i], 
                                       alpha=dAlpha)
             axes[nRowID, nColID].set_xlabel(\
                 (lsColumns2Inspect[i] if bPlotSyncView is False \
                 else strSyncTitle)  +"(rect)" )
-                
-            arrStd = pd.rolling_std(arrData, 
-                                    window=50, min_periods=1)
-            axes[nRowID, nColID].plot(arrStd, color='c')
-            
-            lsSegmentIndex = findEMGSegments(arrData, dSamplingFreq,
-                                             dMinSegmentDuration=2.5,
-                                             dDiscontinuousDuration=2.5)
-            for nStart, nEnd in lsSegmentIndex:
-                axes[nRowID, nColID].axvline(nStart, color='m', ls='--')
-                axes[nRowID, nColID].axvline(nEnd, color='k', ls='--')
-            
             if (tpYLim_rectified is not None):
                 axes[nRowID, nColID].set_ylim(tpYLim_rectified[0],
                                               tpYLim_rectified[1])
             axes[nRowID, nColID].grid('on')
-            
-            # plot coding wnd
-#            for nStart, nEnd in lsData_EMGIndices:
-#                axes[nRowID, nColID].axvline(nStart, color='k', lw=2)
-#                nWndEnd = nStart+nCodingWndSize
-#                while nWndEnd < nEnd:
-#                    axes[nRowID, nColID].axvline(nWndEnd, color='k', lw=1)
-#                    nWndEnd += nCodingWndSize
+                
+            # plot auxiliary line
+            if(bPlotAuxiliaryLine is True):
+                lsSegmentIndex = dcSegments[strFileName]
+                for nStart, nEnd in lsSegmentIndex:
+                    # segment line
+                    axes[nRowID, nColID].axvline(nStart, color='k', 
+                                                 ls='--', lw=2)
+                    axes[nRowID, nColID].axvline(nEnd, color='k', 
+                                                 ls='--', lw=2)
                     
+                    #coding wnd line
+                    for ln in xrange(nStart, nEnd, nCodingWndSize):
+                        axes[nRowID, nColID].axvline(ln, color='c', ls='--')
+            
+            # anatation
             if(bAnatation is True):
                 strKey = "%d-%d" % (i, (i+1)%len(lsData_rectified) )
                 axes[nRowID, nColID].annotate(\
                     'corr_%s = %.2f'% (strKey, dcData_stat[strKey]), 
-                    xy= (.5+i*0.2, .1) if bPlotSyncView \
+                    xy= (.5+i*0.2, .85) if bPlotSyncView \
                         else tpAnatationXYCoor, 
                     xycoords='axes fraction',
                     horizontalalignment='center',
                     verticalalignment='center')
         nCurrentRow += 1
         
-#        
-#    # plot coding data
-#    if(bPlotCoding is True):
-#        for i, arrCoding in enumerate(lsData_coding):
-#            nRowID = nCurrentRow
-#            nColID = i if bPlotSyncView is False else 0
-#            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-#            nVerticalShift = 0 if bPlotSyncView is False else (10*i)
-#            axes[nRowID, nColID].plot(\
-#                arrCoding-nVerticalShift, 
-#                color=lsRGB[i], alpha=dAlpha)
-#            axes[nRowID, nColID].set_xlabel(\
-#                (lsColumns2Inspect[i] if bPlotSyncView is False \
-#                else strSyncTitle ) +"(coding)" )
-#            if (tpYLim_coding is not None):
-#                axes[nRowID, nColID].set_ylim(tpYLim_coding[0],
-#                                              tpYLim_coding[1])
-#            axes[nRowID, nColID].grid('on')
-#        nCurrentRow += 1
-    fig.suptitle(strFileName, 
-                 fontname=strFontName, 
-                 fontsize=nFontSize)
+
+    fig.suptitle(strFileName, fontname=strFontName, fontsize=nFontSize)
     plt.tight_layout()
     plt.show()
     
-
-            
-    
-    
-if __name__ == '__main__':
-    main()

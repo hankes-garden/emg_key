@@ -11,6 +11,32 @@ import matplotlib.pyplot as plt
 import frechet_distance as frechet
 import math
 
+def toBinaryArray(arrData):
+    arrBits = None
+    for i in arrData:
+        # [2:] to chop off the "0b" part
+        arr = np.array([int(digit) for digit in bin(i)[2:]]) 
+        nBitCount = len(arr)
+        if (nBitCount<3): # left-padding
+            arr = np.concatenate((np.zeros(3-nBitCount, dtype=np.int), arr))
+            
+        arrBits = np.concatenate((arrBits, arr) ) if arrBits is not None \
+                    else arr
+    return arrBits
+
+def computeBER(arrCode1, arrCode2):
+    nMatchCount = 0
+    assert(len(arrCode1) == len(arrCode2) )
+    nMinLen = min(len(arrCode1), len(arrCode2) )
+    arrBinaryCode1 = toBinaryArray(arrCode1[:nMinLen])
+    arrBinaryCode2 = toBinaryArray(arrCode2[:nMinLen])
+    
+    for i, j in zip(arrBinaryCode1, arrBinaryCode2):
+        if i == j:
+            nMatchCount += 1
+            
+    return (1.0 - nMatchCount*1.0/len(arrBinaryCode1) )
+
 def generatePattern(nLen, dMin, dMax):
     """
         generate 5 types of shape basics
@@ -41,12 +67,13 @@ def shapeEncoding(arrData, nCodingWndSize):
         
         arrSeg = arrData[nStartIndex:nEndIndex]
         
-        if(np.max(arrSeg)-np.min(arrSeg)<=2.0):
+        if(np.max(arrSeg)-np.min(arrSeg) \
+            <=0.05*(np.max(arrData)-np.min(arrData)) ):
             nCode = 0
         else:
             # examine the shape of segment
             lsTemplates = generatePattern(nCodingWndSize, 
-                                          min(arrSeg), max(arrSeg) )
+                                          min(arrData), max(arrData) )
             dCriteria = 9999999999.0
             nCode = None
             for i, arrShape in enumerate(lsTemplates, 1):
