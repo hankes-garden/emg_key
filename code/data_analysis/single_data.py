@@ -4,10 +4,13 @@ This script provides basic functions for analyzing a single data.
 
 @author: jason
 """
-import source_encoding as encoder
-
-
+import shape_encoder as encoder
+import fec_wrapper as fec
+import coding_tools as ct
 import signal_filter as sf
+
+import matlab.engine
+import sys
 import numpy as np
 import scipy.fftpack as fftpack
 import scipy.signal as sig
@@ -238,12 +241,17 @@ def slidingCorrelation(arrData1, arrData2, nWndSize):
 if __name__ == '__main__':
     """
         examine single data
+        NOTE: need to run "eng = matlab.engine.start_matlab()" in the 
+              ipython console. Such weird way is to save the start time 
+              of the matlab enginee for each run.
     """
-    # ---- load data ----
-    strWorkingDir = "../../data/feasibility/"
-    strFileName = "ww_20160120_220019"
+#==============================================================================
+# load data
+#==============================================================================
+    strWorkingDir = "../../data/feasibility/with_attacker/"
+    strFileName = "yl_ww_20160224_203149"
     
-    dSamplingFreq = 236.0
+    dSamplingFreq = 240.0
     lsColumnNames = ['ch0', 'ch1', 'ch2']
     
     dfData = loadData(strWorkingDir, strFileName, lsColumnNames)
@@ -256,6 +264,7 @@ if __name__ == '__main__':
 #==============================================================================
     # ---- raw ----
     nRawStart, nRawEnd = 0, -1
+    print "%s: [%d:%d]" % (strFileName, nRawStart, nRawEnd)
     lsData_raw = []
     for col in lsColumns2Inspect:
         arrData = dfData[col].iloc[nRawStart: nRawEnd]
@@ -279,8 +288,8 @@ if __name__ == '__main__':
     lsData_filtered = []
     for arrData in lsData_raw:
         # remove power line inteference
-        arrNoise = sf.notch_filter(arrData, dPowerInterference-2., 
-                                   dPowerInterference+2., 
+        arrNoise = sf.notch_filter(arrData, dPowerInterference-1., 
+                                   dPowerInterference+1., 
                                    dSamplingFreq, order=nFilterOrder)
                                    
         arrFiltered = arrData - arrNoise 
@@ -301,62 +310,104 @@ if __name__ == '__main__':
         lsData_fft_filtered.append(arrPSD)
         
     # ---- rectify data ----
-    dRectDuration = 0.5
+    dRectDuration = 2.0
+    nSmoothingWnd = int(2.0 * dSamplingFreq)
     lsData_rectified = []
     for arrData in lsData_filtered:
         arrRect = rectifyEMG(arrData, dSamplingFreq, 
                              dWndDuration=dRectDuration,
-                             method=RECTIFY_ARV)
-        lsData_rectified.append(arrRect)
+                             method=RECTIFY_RMS)
+        arrRect_sm = pd.rolling_mean(arrRect, window=nSmoothingWnd,
+                                     min_periods=1)
+        lsData_rectified.append(arrRect_sm)
         
-    # statistics of data
-    nCodingWndSize = int(0.5*dSamplingFreq)
+    # ---- statistics of data ----
+    nCodingWndSize = int(0.25*dSamplingFreq)
     dcData_stat = {}
-    lsSegments = dcSegments[strFileName]
     for i in xrange(len(lsData_rectified)):
         arrData1 = lsData_rectified[i]
         arrData2 = lsData_rectified[(i+1)%len(lsData_rectified)]
         
-        dTotalCorr = 0.0
-        for nStart, nEnd in lsSegments[:]:
-            arrSeg1 = arrData1[nStart: nEnd]
-            arrSeg2 = arrData2[nStart: nEnd]
-            dCorr = slidingCorrelation(arrSeg1, arrSeg2,
+
+        dCorr = slidingCorrelation(arrData1, arrData2,
                                        nWndSize=nCodingWndSize)
-            dTotalCorr += abs(dCorr)
-        dTotalCorr = dTotalCorr / len(lsSegments[:])
-        dcData_stat["%d-%d" % (i, (i+1)%len(lsData_rectified)) ] = dTotalCorr
+        dcData_stat["%d-%d" % (i, (i+1)%len(lsData_rectified)) ] = dCorr
         
-        
-    print "correlation: \n", dcData_stat, "\n"
-        
-    # coding
-    bCoding = False
+    # ---- coding ----
+    bCoding = True
+    bOutputCode = False
+    bFECCoding = False
+    
+    lsSourceCode = []
+    lsSourceShape = []
+    lsFECCode = []
     if(bCoding):
-        lsData_coding = []
-        for arrData in lsData_rectified:
-            # segment
-            lsSegments = dcSegments[strFileName]
+        # generate code
+        for i, arrData in enumerate(lsData_rectified):
+            lsCode, arrSourceShape = encoder.shapeEncoding(arrData,
+                                                     nCodingWndSize, 5)
+            arrSourceCode = np.array(lsCode)
+#            arrSourceCode_rep = ct.repetiveDecode(arrSourceCode, 3)
+            arrSourceCode_bin = ct.toBinaryArray(arrSourceCode)
+            lsSourceCode.append(np.copy(arrSourceCode_bin) )
+            lsSourceShape.append(arrSourceShape)
             
-            # coding
-            lsSegmentCode = []
-            for nStart, nEnd in lsSegments:
-                arrEMGSeg = arrData[nStart:nEnd]
-                lsCode = encoder.shapeEncoding(arrEMGSeg, nCodingWndSize)
-                lsSegmentCode += lsCode
-            lsData_coding.append(np.array(lsSegmentCode) )
-            
-        # coding performance
-        for i in xrange(len(lsData_coding) ):
-            arrCode1 = lsData_coding[i]
-            arrCode2 = lsData_coding[(i+1) % len(lsData_coding) ]
-            dBER = encoder.computeBER(arrCode1, arrCode2)
-            print("BER(%d, %d)=%.2f" % \
-                    (i, (i+1) % len(lsData_coding), dBER) )
+            if (bFECCoding is True):
+                # FEC
+                m=3 # m >= 3
+                n = 2**m-1
+                k = n-m
                 
+                arrSourceCode_bin, nPd = ct.interleave(arrSourceCode_bin,
+                                                       nBuckets=10)
+                arrSourceCode_bin, nPd = ct.zeroPadding(arrSourceCode_bin, n)
+                arrFECCode_bin = fec.decode(eng, arrSourceCode_bin, n, n-1,
+                                            'cyclic/binary')
+                lsFECCode.append(arrFECCode_bin)
+            
+        # output code
+        if (bOutputCode is True):
+            for i in xrange(len(lsSourceCode) ):
+                print "code%d(%d):" % (i, len(lsSourceCode[i]) )
+                print lsSourceCode[i]
+                print "----"
+            
+            for i in xrange(len(lsFECCode) ):
+                print "fec%d(%d):" % (i, len(lsFECCode[i]) )
+                print lsFECCode[i]
+                print "----"
+        
+            
+        # coding performance    
+        for i in xrange(len(lsSourceCode) ):
+            # before FEC
+            arrSourceCode1 = lsSourceCode[i]
+            arrSourceCode2 = lsSourceCode[(i+1) % len(lsSourceCode) ]
+            nSourceErrorBits = np.sum(abs(arrSourceCode1-arrSourceCode2) )
+            dBER =ct.computeBER(arrSourceCode1, arrSourceCode2)
+            print("BER(%d, %d)=%.2f, error=%d, len=%d " % \
+                (i, (i+1) % len(lsSourceCode), dBER, \
+                nSourceErrorBits, len(arrSourceCode1)) )
+                
+            # after FEC
+            if(bFECCoding is True):
+                arrFECCode1 = lsFECCode[i]
+                arrFECCode2 = lsFECCode[(i+1) % len(lsFECCode) ]
+                nSourceErrorBits_fec = np.sum(abs(arrFECCode1-arrFECCode2) )
+                dBER_fec =ct.computeBER(arrFECCode1, arrFECCode2)
+                print("BER_fec(%d, %d)=%.2f, error=%d, len=%d \n----" % \
+                (i, (i+1) % len(lsFECCode), dBER_fec, 
+                 nSourceErrorBits_fec, len(arrFECCode1) ) )
+                    
+
+        
 #==============================================================================
 # plot
 #==============================================================================
+    bPlot = True
+    if (bPlot is not True):
+        sys.exit(0)
+        
     # look-and-feel
     nFontSize = 18
     strFontName = "Times new Roman"
@@ -380,6 +431,7 @@ if __name__ == '__main__':
     # plot rectified data based on filtered data
     bPlotRectified = True
     bPlotAuxiliaryLine = True
+    bPlotShape = True
     nRectShift = 50
     tpYLim_rectified = None
     
@@ -429,7 +481,7 @@ if __name__ == '__main__':
             nRowID = nCurrentRow
             nColID = i if bPlotSyncView is False else 0
             dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            nVerticalShift = 0 if bPlotSyncView is False else (10*i)
+            nVerticalShift = 0 if bPlotSyncView is False else (50*i)
             axes[nRowID, nColID].plot(arrFreqIndex,
                 arrPSD[nDCEnd:nSamples_fft/2]-nVerticalShift,
                 color=lsRGB[i], alpha=dAlpha)
@@ -497,38 +549,36 @@ if __name__ == '__main__':
             nRowID = nCurrentRow
             nColID = i if bPlotSyncView is False else 0
             dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            nVerticalShift = 0 if bPlotSyncView is False else (2*i)
+            nVerticalShift = 0 if bPlotSyncView is False else (1*i)
             axes[nRowID, nColID].plot(arrData+nVerticalShift,
-                                      color=lsRGB[i], 
+                                      color=lsRGB[i], lw=3, 
                                       alpha=dAlpha)
+            # approximating shapes                                      
+            if(bCoding is True and bPlotShape is True):                          
+                axes[nRowID, nColID].plot(lsSourceShape[i]+nVerticalShift,
+                                          color=lsRGB[i],
+                                          lw=2, alpha=dAlpha)
+                                      
             axes[nRowID, nColID].set_xlabel(\
                 (lsColumns2Inspect[i] if bPlotSyncView is False \
                 else strSyncTitle)  +"(rect)" )
             if (tpYLim_rectified is not None):
                 axes[nRowID, nColID].set_ylim(tpYLim_rectified[0],
                                               tpYLim_rectified[1])
-            axes[nRowID, nColID].grid('on')
                 
             # plot auxiliary line
             if(bPlotAuxiliaryLine is True):
-                lsSegmentIndex = dcSegments[strFileName]
-                for nStart, nEnd in lsSegmentIndex:
-                    # segment line
-                    axes[nRowID, nColID].axvline(nStart, color='k', 
-                                                 ls='--', lw=2)
-                    axes[nRowID, nColID].axvline(nEnd, color='k', 
-                                                 ls='--', lw=2)
-                    
-                    #coding wnd line
-                    for ln in xrange(nStart, nEnd, nCodingWndSize):
-                        axes[nRowID, nColID].axvline(ln, color='c', ls='--')
+                #coding wnd line
+                for ln in xrange(0, len(arrData), nCodingWndSize):
+                    axes[nRowID, nColID].axvline(ln, color='k', 
+                                                 ls='-.', alpha=0.3)
             
             # anatation
             if(bAnatation is True):
                 strKey = "%d-%d" % (i, (i+1)%len(lsData_rectified) )
                 axes[nRowID, nColID].annotate(\
                     'corr_%s = %.2f'% (strKey, dcData_stat[strKey]), 
-                    xy= (.5+i*0.2, .85) if bPlotSyncView \
+                    xy= (.3+i*0.2, .95) if bPlotSyncView \
                         else tpAnatationXYCoor, 
                     xycoords='axes fraction',
                     horizontalalignment='center',
