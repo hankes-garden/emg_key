@@ -42,7 +42,7 @@ def toBinaryArray(arrData, nBitBlock=1):
     return arrBits
     
 
-def interleave(arrData_bin, nBuckets=2):
+def interleave(arrData_bin, nBuckets=7):
     """
         interleave data in a block way
     """
@@ -68,41 +68,27 @@ def deinterleave(arrData_bin, nPadding, nBuckets=2):
     
     return np.ravel(narrData, order='F')[:-nPadding]
         
-def repetiveDecode(arrEncoded, k):
-    # zeroPadding
-    arrEncoded, nPadding = zeroPadding(arrEncoded, k)
-    
-    # decode
-    lsDecoded = []
-    for nStart in xrange(0, len(arrEncoded), k):
-        arrBin = arrEncoded[nStart: nStart+k]
-        dcValueCount = {}
-        for i in arrBin:
-            nCount = dcValueCount.get(i, 0)
-            dcValueCount[i] = nCount + 1
-        nCodeWord = max(dcValueCount.iteritems(), 
-                         key=operator.itemgetter(1))[0]
-        lsDecoded.append(nCodeWord)
-    
-    return np.array(lsDecoded)
-
     
 def computeBER(arrCode1, arrCode2):
+    """
+        compute the BER of two code, i.e., the dismatching rate. If the data
+        is not binary, then transform them first.
+    """
     if(len(arrCode1) != len(arrCode2) ):
         raise ValueError("the lengths of two codes should be the same.")
     
     # convert if it is not binary
+    arrCode1_bin = arrCode1
+    arrCode2_bin = arrCode2
     if(max(max(arrCode1), max(arrCode2) ) != 1 or \
        min(min(arrCode1), min(arrCode2) ) != 0 ):
-        arrCode1 = toBinaryArray(arrCode1)
-        arrCode2 = toBinaryArray(arrCode2)
+        arrCode1_bin = toBinaryArray(arrCode1)
+        arrCode2_bin = toBinaryArray(arrCode2)
+    
         
-    nMatchingCount = 0
-    for j in xrange(len(arrCode1) ):
-        if(arrCode1[j] == arrCode2[j]):
-            nMatchingCount += 1
-    dBER = 1 - nMatchingCount*1.0/len(arrCode1)
-    return dBER
+    nDismatchCount = np.size(arrCode1_bin) - np.sum(arrCode1_bin==arrCode2_bin)
+    dBER = nDismatchCount*1.0/np.size(arrCode1_bin)
+    return nDismatchCount, dBER
     
 
     

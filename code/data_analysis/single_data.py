@@ -5,21 +5,47 @@ This script provides basic functions for analyzing a single data.
 @author: jason
 """
 import shape_encoder as encoder
-import fec_wrapper as fec
 import coding_tools as ct
 import signal_filter as sf
+import data_tools as dt
+import error_correction_coder as ecc
+from tools import common_function as cf
 
 import matlab.engine
-import sys
 import numpy as np
 import scipy.fftpack as fftpack
-import scipy.signal as sig
 import matplotlib.pyplot as plt
 import pandas as pd
 import math
-from scipy import stats
 from collections import deque
 import itertools
+
+USER_BER_SRC = 'user_ber_src'
+ATTACKER_BER_SRC = 'attacker_ber_src'
+
+USER_BER_EC = 'user_ber_ec'
+ATTACKER_BER_EC = 'attacker_ber_ec'
+
+USER_ERR_SRC = 'user_err_src'
+ATTACKER_ERR_SRC = 'attacker_err_src'
+
+USER_ERR_EC = 'user_err_ec'
+ATTACKER_ERR_EC = 'attacker_err_ec'
+
+CODE_LEN_SRC = 'code_len_src'
+CODE_LEN_EC = 'code_len_ec'
+
+ATTACKER = 'attacker'
+USER = 'user'
+PAYEND = 'payend'
+FILE_NAME = 'fname'
+N = 'n'
+M = 'm'
+K = 'k'
+R = 'r'
+CODER = 'coder'
+KN_RATIO = 'nk_ratio'
+
 
 lsRGB = ['r', 'g', 'b']
 lsCMYK = ['c', 'm', 'y']
@@ -31,6 +57,17 @@ RECTIFY_RMS = 'RMS'
 MEAN_FREQ = "mean_freq"
 MEDIAN_FREQ = "median_freq"
 
+DATA_ID_ATTACKER = 0
+DATA_ID_HAND = 1
+DATA_ID_PAYEND = 2
+
+DELTA = 'delta'
+DATA_1 = 'data_1'
+DATA_2 = 'data_2'
+DEDUCED_D1 = 'deduced_d1'
+BER = 'BER'
+ERROR_COUNT = 'error_count'
+
 
 dcSegments = {\
 'ww_20160120_220524': [(500, 3700), (5100, 8300), (10000, 12400)],
@@ -38,7 +75,6 @@ dcSegments = {\
 'ww_20160120_220245': [(900, 4300), (5100, 8300), (9500, 12700)],
 'ww_20160120_220126': [(750, 4600), (5800, 9500), (11100, 16000)],
 'ww_20160120_220019': [(670, 3080), (4100, 7200), (8700, 12200)] }
-
 
 
 def computeMeanFrequency(arrPSD, arrFreqIndex):
@@ -62,8 +98,6 @@ def computeMedianFrequency(arrPSD, arrFreqIndex):
             break
         
     return dMedianFreq
-    
-    
 
 def RMS(arrData):
     """
@@ -91,14 +125,6 @@ def rectifyEMG(arrData, dSamplingFreq, dWndDuration=0.245, method='RMS'):
         raise ValueError("Unknown method: %s" % method)
     
     return arrRectified
-
-def computeEnvelope(arrData, nWindow, nMinPeriods=None):
-    """compute upper and lower envelope for given data"""
-    arrUpperEnvelope = pd.rolling_max(pd.Series(arrData), window=nWindow,
-                                      min_periods=nMinPeriods, center=True)
-    arrLowerEnvelope = pd.rolling_min(pd.Series(arrData), window=nWindow,
-                                     min_periods=nMinPeriods, center=True)
-    return arrUpperEnvelope, arrLowerEnvelope
     
 def findEMGSegments(arrData, dSamplingFreq, 
                     dThreshold=0.9,
@@ -173,7 +199,7 @@ def findEMGSegments(arrData, dSamplingFreq,
     return lsMergedSegments
             
             
-def loadData(strWorkingDir, strFileName, lsColumnNames, strFileExt = '.txt'):
+def loadData(strWorkingDir, strFileName, lsColumnNames, strFileExt = ''):
     """
         This function loads and clears a single acceleromter data
 
@@ -207,50 +233,25 @@ def loadData(strWorkingDir, strFileName, lsColumnNames, strFileExt = '.txt'):
 
     return dfData_filtered
     
-
-def normalizedCrossCorr(arrData0, arrData1):
+     
+def evaluateSingleData(strWorkingDir, strFileName, 
+                       eng, strCoder, m, r, n, k,
+                       bPlot=False):
     """
-        Compute the normalized cross correlation
+        Given the values of parameters, test performance on single data
     """
-    arrCrossCorr = np.correlate(arrData0, arrData1, mode='full')
-    dDenominator = np.sqrt(np.dot(arrData0, arrData0) * \
-                           np.dot(arrData1, arrData1) )
-                           
-    arrNormCrossCorr = arrCrossCorr/dDenominator
-    nMaxIndex = np.argmax(abs(arrNormCrossCorr) )
-    dCorr = arrNormCrossCorr[nMaxIndex]
-    nLag = nMaxIndex - len(arrData0)
-    return dCorr, nLag, arrNormCrossCorr
-        
-def slidingCorrelation(arrData1, arrData2, nWndSize):
-    """
-        compute correlation btw two signals with sliding window
-    """
-    nLen = min(len(arrData1), len(arrData2) )
+    dcDataResult = {}
+    dcDataResult[FILE_NAME] = strFileName
+    dcDataResult[M] = m
+    dcDataResult[R] = r
+    dcDataResult[N] = n
+    dcDataResult[K] = k
+    dcDataResult[KN_RATIO] = k*1.0/n
+    dcDataResult[CODER] = strCoder
     
-    dTotalCorr = 0.0
-    for nStart in xrange(0, nLen-nWndSize, nWndSize):
-        nEnd = min(nStart + nWndSize, nLen)
-        dCorr, p = stats.pearsonr(arrData1[nStart: nEnd], 
-                                  arrData2[nStart: nEnd])
-        dTotalCorr += dCorr
-    dTotalCorr = dTotalCorr * nWndSize / nLen
-    return dTotalCorr
-     
-     
-if __name__ == '__main__':
-    """
-        examine single data
-        NOTE: need to run "eng = matlab.engine.start_matlab()" in the 
-              ipython console. Such weird way is to save the start time 
-              of the matlab enginee for each run.
-    """
 #==============================================================================
 # load data
 #==============================================================================
-    strWorkingDir = "../../data/feasibility/with_attacker/"
-    strFileName = "yl_ww_20160224_203149"
-    
     dSamplingFreq = 240.0
     lsColumnNames = ['ch0', 'ch1', 'ch2']
     
@@ -264,14 +265,13 @@ if __name__ == '__main__':
 #==============================================================================
     # ---- raw ----
     nRawStart, nRawEnd = 0, -1
-    print "%s: [%d:%d]" % (strFileName, nRawStart, nRawEnd)
+    print "--%s: [%d:%d]--" % (strFileName, nRawStart, nRawEnd)
     lsData_raw = []
     for col in lsColumns2Inspect:
         arrData = dfData[col].iloc[nRawStart: nRawEnd]
         lsData_raw.append(arrData)
         
     # ---- fft ----
-    nDCEnd = 2
     nSamples_fft = len(lsData_raw[0])
     dRes_fft = dSamplingFreq*1.0/nSamples_fft
     lsData_fft = []
@@ -310,8 +310,8 @@ if __name__ == '__main__':
         lsData_fft_filtered.append(arrPSD)
         
     # ---- rectify data ----
-    dRectDuration = 2.0
-    nSmoothingWnd = int(2.0 * dSamplingFreq)
+    dRectDuration = 0.9
+    nSmoothingWnd = int(1.5* dSamplingFreq)
     lsData_rectified = []
     for arrData in lsData_filtered:
         arrRect = rectifyEMG(arrData, dSamplingFreq, 
@@ -319,274 +319,334 @@ if __name__ == '__main__':
                              method=RECTIFY_RMS)
         arrRect_sm = pd.rolling_mean(arrRect, window=nSmoothingWnd,
                                      min_periods=1)
+                                     
         lsData_rectified.append(arrRect_sm)
         
+    # ---- find extrema of data ----
+    nExtremaWnd = int(0.5*dSamplingFreq)
+    lsData_extrema = []
+    for arrData in lsData_rectified:
+        arrExtreInd = dt.findExtrema(arrData, nExtremaWnd)
+        lsData_extrema.append(arrExtreInd)
+        
     # ---- statistics of data ----
-    nCodingWndSize = int(0.25*dSamplingFreq)
+    nCodingWndSize = int(0.2*dSamplingFreq)
     dcData_stat = {}
     for i in xrange(len(lsData_rectified)):
         arrData1 = lsData_rectified[i]
         arrData2 = lsData_rectified[(i+1)%len(lsData_rectified)]
-        
-
-        dCorr = slidingCorrelation(arrData1, arrData2,
+        dCorr = dt.slidingCorrelation(arrData1, arrData2,
                                        nWndSize=nCodingWndSize)
         dcData_stat["%d-%d" % (i, (i+1)%len(lsData_rectified)) ] = dCorr
         
     # ---- coding ----
-    bCoding = True
-    bOutputCode = False
-    bFECCoding = False
-    
-    lsSourceCode = []
-    lsSourceShape = []
-    lsFECCode = []
-    if(bCoding):
-        # generate code
+    bSourceEncoding = True
+    bReconciliation = True
+    if(bSourceEncoding):
+        # source encoding
+        lsSourceCode = []           # source code in binary
+        lsSourceShape = []          # shape of source
         for i, arrData in enumerate(lsData_rectified):
             lsCode, arrSourceShape = encoder.shapeEncoding(arrData,
                                                      nCodingWndSize, 5)
             arrSourceCode = np.array(lsCode)
-#            arrSourceCode_rep = ct.repetiveDecode(arrSourceCode, 3)
             arrSourceCode_bin = ct.toBinaryArray(arrSourceCode)
-            lsSourceCode.append(np.copy(arrSourceCode_bin) )
+            lsSourceCode.append(arrSourceCode_bin)
             lsSourceShape.append(arrSourceShape)
+            dcDataResult[CODE_LEN_SRC] = len(arrSourceCode_bin)
             
-            if (bFECCoding is True):
-                # FEC
-                m=3 # m >= 3
-                n = 2**m-1
-                k = n-m
+        # reconciliation
+        dcReconciliation = {}
+        if(bReconciliation):
+            nPadding = n*m if strCoder==ecc.CODER_RS else n
+            nInterleavingSize = 10
+ 
+            for i in [DATA_ID_HAND, DATA_ID_ATTACKER]:
+                # compute delta
+                arrData_bin_1 = np.copy(lsSourceCode[i])
+                arrData_bin_1, nPd = ct.interleave(arrData_bin_1,
+                                                   nBuckets=nInterleavingSize)
+                arrData_bin_1, nPd = ct.zeroPadding(arrData_bin_1, nPadding)
+                arrDelta = ecc.computeDelta(eng, arrData_bin_1, 
+                                            n, k, m, strCoder)
+                                            
+                # reconciliation
+                arrData_bin_2 = np.copy(lsSourceCode[DATA_ID_PAYEND])
+                arrData_bin_2, nPd = ct.interleave(arrData_bin_2,
+                                                   nBuckets=nInterleavingSize)
+                arrData_bin_2, nPd = ct.zeroPadding(arrData_bin_2, nPadding)
                 
-                arrSourceCode_bin, nPd = ct.interleave(arrSourceCode_bin,
-                                                       nBuckets=10)
-                arrSourceCode_bin, nPd = ct.zeroPadding(arrSourceCode_bin, n)
-                arrFECCode_bin = fec.decode(eng, arrSourceCode_bin, n, n-1,
-                                            'cyclic/binary')
-                lsFECCode.append(arrFECCode_bin)
-            
-        # output code
-        if (bOutputCode is True):
-            for i in xrange(len(lsSourceCode) ):
-                print "code%d(%d):" % (i, len(lsSourceCode[i]) )
-                print lsSourceCode[i]
-                print "----"
-            
-            for i in xrange(len(lsFECCode) ):
-                print "fec%d(%d):" % (i, len(lsFECCode[i]) )
-                print lsFECCode[i]
-                print "----"
-        
-            
-        # coding performance    
-        for i in xrange(len(lsSourceCode) ):
-            # before FEC
-            arrSourceCode1 = lsSourceCode[i]
-            arrSourceCode2 = lsSourceCode[(i+1) % len(lsSourceCode) ]
-            nSourceErrorBits = np.sum(abs(arrSourceCode1-arrSourceCode2) )
-            dBER =ct.computeBER(arrSourceCode1, arrSourceCode2)
-            print("BER(%d, %d)=%.2f, error=%d, len=%d " % \
-                (i, (i+1) % len(lsSourceCode), dBER, \
-                nSourceErrorBits, len(arrSourceCode1)) )
-                
-            # after FEC
-            if(bFECCoding is True):
-                arrFECCode1 = lsFECCode[i]
-                arrFECCode2 = lsFECCode[(i+1) % len(lsFECCode) ]
-                nSourceErrorBits_fec = np.sum(abs(arrFECCode1-arrFECCode2) )
-                dBER_fec =ct.computeBER(arrFECCode1, arrFECCode2)
-                print("BER_fec(%d, %d)=%.2f, error=%d, len=%d \n----" % \
-                (i, (i+1) % len(lsFECCode), dBER_fec, 
-                 nSourceErrorBits_fec, len(arrFECCode1) ) )
+                arrDeduced_bin = ecc.reconciliate(eng, arrDelta,
+                                                  arrData_bin_2,
+                                                  n, k, m, strCoder)
                     
-
+                dcReconciliation[i] = {DATA_1: arrData_bin_1, 
+                                       DATA_2: arrData_bin_2,
+                                       DEDUCED_D1: arrDeduced_bin}
+                                                
+            
+            # coding performance    
+            for i in [DATA_ID_HAND, DATA_ID_ATTACKER]:
+                # before reconciliation
+                arrSrcCode1 = lsSourceCode[i]
+                arrSrcCode2 = lsSourceCode[DATA_ID_PAYEND]
+                nErrorBits_src, dBER_src =ct.computeBER(arrSrcCode1,
+                                                        arrSrcCode2)
+#                print("src: BER(%d, %d)=%.3f, error=%d, len=%d" % \
+#                      (i, DATA_ID_PAYEND, dBER_src, \
+#                      nErrorBits_src, len(arrSrcCode1) ) )
+            
+                # after reconciliation
+                arrData_bin_1 = dcReconciliation[i][DATA_1]
+                arrDeduced_1 = dcReconciliation[i][DEDUCED_D1]
         
+                nErrorBits_recon, dBER_recon =ct.computeBER(arrData_bin_1,
+                                                            arrDeduced_1)
+#                print("rec: BER(%d, %d)=%.3f, error=%d, len=%d" % \
+#                      (i, DATA_ID_PAYEND, dBER_recon, \
+#                      nErrorBits_recon, len(arrDeduced_1) ) )
+                dcDataResult[CODE_LEN_EC] = len(arrDeduced_1)
+                if(i == DATA_ID_HAND):
+                    dcDataResult[USER_BER_SRC] = dBER_src
+                    dcDataResult[USER_BER_EC] = dBER_recon
+                    dcDataResult[USER_ERR_SRC] = nErrorBits_src
+                    dcDataResult[USER_ERR_EC] = nErrorBits_recon
+                else:
+                    dcDataResult[ATTACKER_BER_SRC] = dBER_src
+                    dcDataResult[ATTACKER_BER_EC] = dBER_recon
+                    dcDataResult[ATTACKER_ERR_SRC] = nErrorBits_src
+                    dcDataResult[ATTACKER_ERR_EC] = nErrorBits_recon
+                        
 #==============================================================================
 # plot
 #==============================================================================
-    bPlot = True
-    if (bPlot is not True):
-        sys.exit(0)
+    if (bPlot):
+        # look-and-feel
+        nFontSize = 18
+        strFontName = "Times new Roman"
         
-    # look-and-feel
-    nFontSize = 18
-    strFontName = "Times new Roman"
-    
-    # plot raw 
-    bPlotRawData = False
-    tpYLim_raw = None
-    
-    # plot fft on raw data
-    bPlotFFT = False
-    tpYLim_fft = None
-    
-    # plot filtered data
-    bPlotFiltered = False
-    tpYLim_filtered = None
-    
-    # plot fft on filtered data
-    bPlotFFTonFiltered = False
-    tpYLim_fft_filtered = None
-    
-    # plot rectified data based on filtered data
-    bPlotRectified = True
-    bPlotAuxiliaryLine = True
-    bPlotShape = True
-    nRectShift = 50
-    tpYLim_rectified = None
-    
-    # plot synchronized view
-    bPlotSyncView = True
-    strSyncTitle = "".join([s+"_" for s in lsColumns2Inspect] )
-    
-    # bAnatation
-    bAnatation = True
-    tpAnatationXYCoor = (.75, .9)
-    
-    # create axes
-    nRows = np.sum([bPlotRawData, bPlotFFT, bPlotFiltered, 
-                    bPlotFFTonFiltered, bPlotRectified] )
-    nCols= len(lsColumns2Inspect) if bPlotSyncView is False else 1
-    fig, axes = plt.subplots(nrows=nRows, ncols=nCols, squeeze=False)
-    
-    nCurrentRow = 0
-    
-    # ---- plot raw data -----
-    if(bPlotRawData is True):
-        for i, arrData in enumerate(lsData_raw):
-            nRowID = nCurrentRow
-            nColID = i if bPlotSyncView is False else 0
-            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            nVerticalShift = 0 if bPlotSyncView is False else (400*i)
-            axes[nRowID, nColID].plot(arrData-nVerticalShift, 
-                                      color=lsRGB[i], 
-                                      alpha=dAlpha,
-                                      label=lsColumns2Inspect[i])
-            axes[nRowID, nColID].set_xlabel(\
-                (lsColumns2Inspect[i] if bPlotSyncView is False \
-                else  strSyncTitle) + "(raw)" ) 
-            if (tpYLim_raw is not None):
-                axes[nRowID, nColID].set_ylim(tpYLim_raw[0], tpYLim_raw[1])
-            axes[nRowID, nColID].grid('on')
-            
-        nCurrentRow += 1
+        # plot raw 
+        bPlotRawData = False
+        tpYLim_raw = None
         
-    # ---- plot FFT ----
-    if (bPlotFFT is True):
-        for i, arrPSD in enumerate(lsData_fft):
-            arrFreqIndex = np.linspace(nDCEnd*dRes_fft, 
-                                       dSamplingFreq/2.0, 
-                                       nSamples_fft/2-nDCEnd)
-                                       
-            nRowID = nCurrentRow
-            nColID = i if bPlotSyncView is False else 0
-            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            nVerticalShift = 0 if bPlotSyncView is False else (50*i)
-            axes[nRowID, nColID].plot(arrFreqIndex,
-                arrPSD[nDCEnd:nSamples_fft/2]-nVerticalShift,
-                color=lsRGB[i], alpha=dAlpha)
-            axes[nRowID, nColID].set_xticks(range(0, 
-                                            int(dSamplingFreq/2), 10) )
-            axes[nRowID, nColID].set_xlabel( \
-                (lsColumns2Inspect[i]  if bPlotSyncView is False \
-                else strSyncTitle ) +"(fft)" )
-            if (tpYLim_fft is not None):
-                axes[nRowID, nColID].set_ylim(tpYLim_fft[0], tpYLim_fft[1])
-            axes[nRowID, nColID].grid('on')
-
-        nCurrentRow += 1
-            
-    # ---- plot filtered data ----
-    if(bPlotFiltered is True):
-        for i, arrFiltered in enumerate(lsData_filtered):
-            nRowID = nCurrentRow
-            nColID = i if bPlotSyncView is False else 0
-            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            nVerticalShift = 0 if bPlotSyncView is False else (80*i)
-            axes[nRowID, nColID].plot(\
-                arrFiltered-nVerticalShift,
-                color=lsRGB[i], alpha=dAlpha)
+        # plot fft on raw data
+        bPlotFFT = False
+        tpYLim_fft = None
+        
+        # plot filtered data
+        bPlotFiltered = False
+        tpYLim_filtered = None
+        
+        # plot fft on filtered data
+        bPlotFFTonFiltered = False
+        tpYLim_fft_filtered = None
+        
+        # plot rectified data based on filtered data
+        bPlotRectified = True
+        bPlotAuxiliaryLine = True
+        bPlotShape = True
+        bAnnotateExtrema = False
+        nRectShift = 50
+        tpYLim_rectified = None
+        
+        
+        # plot synchronized view
+        bPlotSyncView = True
+        strSyncTitle = "".join([s+"_" for s in lsColumns2Inspect] )
+        
+        # bAnatation
+        bAnatation = True
+        tpAnatationXYCoor = (.75, .9)
+        
+        # create axes
+        nRows = np.sum([bPlotRawData, bPlotFFT, bPlotFiltered, 
+                        bPlotFFTonFiltered, bPlotRectified] )
+        nCols= len(lsColumns2Inspect) if bPlotSyncView is False else 1
+        fig, axes = plt.subplots(nrows=nRows, ncols=nCols, squeeze=False)
+        
+        nCurrentRow = 0
+        
+        # ---- plot raw data -----
+        if(bPlotRawData is True):
+            for i, arrData in enumerate(lsData_raw):
+                nRowID = nCurrentRow
+                nColID = i if bPlotSyncView is False else 0
+                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+                nVerticalShift = 0 if bPlotSyncView is False else (100*i)
+                axes[nRowID, nColID].plot(arrData-nVerticalShift, 
+                                          color=lsRGB[i], 
+                                          alpha=dAlpha,
+                                          label=lsColumns2Inspect[i])
+                axes[nRowID, nColID].set_xlabel(\
+                    (lsColumns2Inspect[i] if bPlotSyncView is False \
+                    else  strSyncTitle) + "(raw)" ) 
+                if (tpYLim_raw is not None):
+                    axes[nRowID, nColID].set_ylim(tpYLim_raw[0], tpYLim_raw[1])
+                axes[nRowID, nColID].grid('on')
                 
-            axes[nRowID, nColID].set_xlabel(\
-                (lsColumns2Inspect[i] if bPlotSyncView is False \
-                else strSyncTitle )  +"(filtered)" )
-            if (tpYLim_filtered is not None):
-                axes[nRowID, nColID].set_ylim(tpYLim_filtered[0],
-                                              tpYLim_filtered[1])
-            axes[nRowID, nColID].grid('on')
-        nCurrentRow += 1
-        
-    # ---- plot FFT on filtered data ----
-    if (bPlotFFTonFiltered is True):
-        for i, arrPSD in enumerate(lsData_fft_filtered):
-            arrFreqIndex = np.linspace(nDCEnd*dRes_fft_filtered, 
-                                       dSamplingFreq/2.0, 
-                                       nSamples_fft_filtered/2-nDCEnd)
-                                       
-            nRowID = nCurrentRow
-            nColID = i if bPlotSyncView is False else 0
-            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            nVerticalShift = 0 if bPlotSyncView is False else (3*i)
-            axes[nRowID, nColID].plot(arrFreqIndex,
-                arrPSD[nDCEnd: int(nSamples_fft_filtered/2.0)] \
-                    -nVerticalShift,
-                color=lsRGB[i], alpha=dAlpha)
-            axes[nRowID, nColID].set_xticks(range(0, 
-                                            int(dSamplingFreq/2), 10) )
-            axes[nRowID, nColID].set_xlabel( \
-                (lsColumns2Inspect[i]  if bPlotSyncView is False \
-                else strSyncTitle ) +"(fft@filtered)")
-            if (tpYLim_fft_filtered is not None):
-                axes[nRowID, nColID].set_ylim(tpYLim_fft_filtered[0], 
-                                              tpYLim_fft_filtered[1])
-            axes[nRowID, nColID].grid('on')
-        nCurrentRow += 1
-    
-    
-    # ---- plot rectified data ----
-    if(bPlotRectified is True):
-        for i, arrData in enumerate(lsData_rectified):
-            nRowID = nCurrentRow
-            nColID = i if bPlotSyncView is False else 0
-            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-            nVerticalShift = 0 if bPlotSyncView is False else (1*i)
-            axes[nRowID, nColID].plot(arrData+nVerticalShift,
-                                      color=lsRGB[i], lw=3, 
-                                      alpha=dAlpha)
-            # approximating shapes                                      
-            if(bCoding is True and bPlotShape is True):                          
-                axes[nRowID, nColID].plot(lsSourceShape[i]+nVerticalShift,
-                                          color=lsRGB[i],
-                                          lw=2, alpha=dAlpha)
-                                      
-            axes[nRowID, nColID].set_xlabel(\
-                (lsColumns2Inspect[i] if bPlotSyncView is False \
-                else strSyncTitle)  +"(rect)" )
-            if (tpYLim_rectified is not None):
-                axes[nRowID, nColID].set_ylim(tpYLim_rectified[0],
-                                              tpYLim_rectified[1])
-                
-            # plot auxiliary line
-            if(bPlotAuxiliaryLine is True):
-                #coding wnd line
-                for ln in xrange(0, len(arrData), nCodingWndSize):
-                    axes[nRowID, nColID].axvline(ln, color='k', 
-                                                 ls='-.', alpha=0.3)
+            nCurrentRow += 1
             
-            # anatation
-            if(bAnatation is True):
-                strKey = "%d-%d" % (i, (i+1)%len(lsData_rectified) )
-                axes[nRowID, nColID].annotate(\
-                    'corr_%s = %.2f'% (strKey, dcData_stat[strKey]), 
-                    xy= (.3+i*0.2, .95) if bPlotSyncView \
-                        else tpAnatationXYCoor, 
-                    xycoords='axes fraction',
-                    horizontalalignment='center',
-                    verticalalignment='center')
-        nCurrentRow += 1
+        # ---- plot FFT ----
+        nDCEnd = 10
+        if (bPlotFFT is True):
+            for i, arrPSD in enumerate(lsData_fft):
+                arrFreqIndex = np.linspace(nDCEnd*dRes_fft, 
+                                           dSamplingFreq/2.0, 
+                                           nSamples_fft/2-nDCEnd)
+                                           
+                nRowID = nCurrentRow
+                nColID = i if bPlotSyncView is False else 0
+                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+                nVerticalShift = 0 if bPlotSyncView is False else (50*i)
+                axes[nRowID, nColID].plot(arrFreqIndex,
+                    arrPSD[nDCEnd:nSamples_fft/2]-nVerticalShift,
+                    color=lsRGB[i], alpha=dAlpha)
+                axes[nRowID, nColID].set_xticks(range(0, 
+                                                int(dSamplingFreq/2), 10) )
+                axes[nRowID, nColID].set_xlabel( \
+                    (lsColumns2Inspect[i]  if bPlotSyncView is False \
+                    else strSyncTitle ) +"(fft)" )
+                if (tpYLim_fft is not None):
+                    axes[nRowID, nColID].set_ylim(tpYLim_fft[0], tpYLim_fft[1])
+                axes[nRowID, nColID].grid('on')
+    
+            nCurrentRow += 1
+                
+        # ---- plot filtered data ----
+        if(bPlotFiltered is True):
+            for i, arrFiltered in enumerate(lsData_filtered):
+                nRowID = nCurrentRow
+                nColID = i if bPlotSyncView is False else 0
+                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+                nVerticalShift = 0 if bPlotSyncView is False else (80*i)
+                axes[nRowID, nColID].plot(\
+                    arrFiltered-nVerticalShift,
+                    color=lsRGB[i], alpha=dAlpha)
+                    
+                axes[nRowID, nColID].set_xlabel(\
+                    (lsColumns2Inspect[i] if bPlotSyncView is False \
+                    else strSyncTitle )  +"(filtered)" )
+                if (tpYLim_filtered is not None):
+                    axes[nRowID, nColID].set_ylim(tpYLim_filtered[0],
+                                                  tpYLim_filtered[1])
+                axes[nRowID, nColID].grid('on')
+            nCurrentRow += 1
+            
+        # ---- plot FFT on filtered data ----
+        if (bPlotFFTonFiltered is True):
+            for i, arrPSD in enumerate(lsData_fft_filtered):
+                arrFreqIndex = np.linspace(nDCEnd*dRes_fft_filtered, 
+                                           dSamplingFreq/2.0, 
+                                           nSamples_fft_filtered/2-nDCEnd)
+                                           
+                nRowID = nCurrentRow
+                nColID = i if bPlotSyncView is False else 0
+                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+                nVerticalShift = 0 if bPlotSyncView is False else (30*i)
+                
+                axes[nRowID, nColID].plot(arrFreqIndex,
+                    pd.rolling_mean(\
+                        arrPSD[nDCEnd: int(nSamples_fft_filtered/2.0)] \
+                        -nVerticalShift, window=40, min_periods=1),
+                    color=lsRGB[i], alpha=dAlpha)
+                    
+                axes[nRowID, nColID].set_xticks(range(0, 
+                                                int(dSamplingFreq/2), 10) )
+                axes[nRowID, nColID].set_xlabel( \
+                    (lsColumns2Inspect[i]  if bPlotSyncView is False \
+                    else strSyncTitle ) +"(fft@filtered)")
+                if (tpYLim_fft_filtered is not None):
+                    axes[nRowID, nColID].set_ylim(tpYLim_fft_filtered[0], 
+                                                  tpYLim_fft_filtered[1])
+                axes[nRowID, nColID].grid('on')
+            nCurrentRow += 1
         
-
-    fig.suptitle(strFileName, fontname=strFontName, fontsize=nFontSize)
-    plt.tight_layout()
-    plt.show()
+        
+        # ---- plot rectified data ----
+        if(bPlotRectified is True):
+            for i, arrData in enumerate(lsData_rectified):
+                nRowID = nCurrentRow
+                nColID = i if bPlotSyncView is False else 0
+                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+                nDataShift = 0 if bPlotSyncView is False else (0*i)
+                nShapeShift = 0 if bPlotSyncView is False else (1*i)
+                
+                # rectified data
+                axes[nRowID, nColID].plot(arrData+nDataShift,
+                                          color=lsRGB[i], lw=3, 
+                                          alpha=dAlpha)
+                # approximating shapes                                      
+                if(bSourceEncoding is True and bPlotShape is True):                          
+                    axes[nRowID, nColID].plot(lsSourceShape[i]+nShapeShift,
+                                              color=lsRGB[i],
+                                              lw=2, alpha=dAlpha)
+                                          
+                axes[nRowID, nColID].set_xlabel(\
+                    (lsColumns2Inspect[i] if bPlotSyncView is False \
+                    else strSyncTitle)  +"(rect)" )
+                if (tpYLim_rectified is not None):
+                    axes[nRowID, nColID].set_ylim(tpYLim_rectified[0],
+                                                  tpYLim_rectified[1])
+                    
+                # plot auxiliary line
+                if(bPlotAuxiliaryLine is True):
+                    #coding wnd line
+                    for ln in xrange(0, len(arrData), nCodingWndSize):
+                        axes[nRowID, nColID].axvline(ln, color='k', 
+                                                     ls='-.', alpha=0.3)
+                
+                # anatation: stats
+                if(bAnatation is True):
+                    strKey = "%d-%d" % (i, (i+1)%len(lsData_rectified) )
+                    axes[nRowID, nColID].annotate(\
+                        'corr_%s = %.2f'% (strKey, dcData_stat[strKey]), 
+                        xy= (.3+i*0.2, .95) if bPlotSyncView \
+                            else tpAnatationXYCoor, 
+                        xycoords='axes fraction',
+                        horizontalalignment='center',
+                        verticalalignment='center')
+                        
+                # anatation: extrema
+                if(bAnnotateExtrema is True ):
+                    arrExtremaInd = lsData_extrema[i]
+                    for ind in arrExtremaInd:
+                        axes[nRowID, nColID].annotate("e%d"%i, 
+                            xy=(ind, arrData[ind]), 
+                            xytext=(ind, arrData[ind]+3),
+                            arrowprops=dict(facecolor=lsRGB[i], color=lsRGB[i],
+                                            shrink=0.05,
+                                            headwidth=5, width=0.5))
+            nCurrentRow += 1
+            
+    
+        fig.suptitle(strFileName, fontname=strFontName, fontsize=nFontSize)
+        plt.tight_layout()
+        plt.show()
+        
+    return dcDataResult
+    
+    
+if __name__ == '__main__':
+    if('eng' not in globals() ):
+        print "start matlab engine..."
+        eng = matlab.engine.start_matlab()
+    else:
+        print "matlab engine is already existed."
+    
+    # setup
+    strWorkingDir = "../../data/feasibility/with_attacker/"
+    strFileName = 'yl_ww_20160224_210921.txt'
+    
+    strCoder = ecc.CODER_RS
+    m = 3    
+    n = 7
+    k = 3
+    r = int(math.floor((n-k)/2.0) )
+    
+    # evaluate                          
+    dcDataResult = evaluateSingleData(strWorkingDir, strFileName, eng, 
+                                      strCoder, m, r, n, k, bPlot=False)
+    
+       
+    print dcDataResult
     

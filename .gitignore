@@ -2,8 +2,7 @@ related_works/
 presentation/
 paper/
 code/reference/
-code/data_analysis/rs/
-code/data_analysis/*.pyc
+code/data_analysis/test.py
 desktop.ini
 *.xmind
 *.pyc

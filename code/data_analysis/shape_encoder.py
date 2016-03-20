@@ -14,14 +14,13 @@ import numpy as np
 
 
 FLAT_PATTERN_THRESHOLD = 0.2
+FLAT_PATTERN_RANGE = 0.5
 
 SHAPE_CODE_INCREASE = 1
 SHAPE_CODE_DECREASE = 2
 SHAPE_CODE_FLAT = 0
 SHAPE_CODE_CONVEX = 4
 SHAPE_CODE_CONCAVE = 5
-
-
 
 
 def generateShapeTemplates(nLen, dRange, dPeakRatio = 1.0):
@@ -53,7 +52,6 @@ def generateShapeTemplates(nLen, dRange, dPeakRatio = 1.0):
     return {SHAPE_CODE_INCREASE: arrIncrease, 
             SHAPE_CODE_DECREASE: arrDecrease}
             
-
             
 def shapeEncoding(arrData, nCodingWndSize, nNeighbors=3):
     '''
@@ -88,7 +86,6 @@ def shapeEncoding(arrData, nCodingWndSize, nNeighbors=3):
             # forget about the last segment if it is shorter than nWndSize
             break
         
-        
         arrWndData = arrData[nStartIndex:nEndIndex]
         arrWndData_shift = arrWndData - np.min(arrWndData) # remove base line
         
@@ -114,11 +111,18 @@ def shapeEncoding(arrData, nCodingWndSize, nNeighbors=3):
                 dMaxNeighborRange = dRange
             
         # generate patterns
-        dcPatterns = generateShapeTemplates(nCodingWndSize, dMaxNeighborRange)
+        dcPatterns = generateShapeTemplates(nCodingWndSize, 
+                                            np.ptp(arrWndData_shift) )
         
         # examine the shape of data within window
+        nDebugIndex = None
+        if (nDebugIndex is not None and \
+            nStartIndex <= nDebugIndex and nEndIndex > nDebugIndex):
+            pdb.set_trace()        
+        
         nCode = None
-        if(np.std(arrWndData_shift) <= FLAT_PATTERN_THRESHOLD ):
+        if(np.ptp(arrWndData_shift) < FLAT_PATTERN_RANGE):
+#        if(np.std(arrWndData_shift) <= FLAT_PATTERN_THRESHOLD ):
             nCode = SHAPE_CODE_FLAT
             arrWndShape = np.zeros(nCodingWndSize)
         else:
@@ -136,6 +140,7 @@ def shapeEncoding(arrData, nCodingWndSize, nNeighbors=3):
             else np.concatenate([arrDataShape, arrWndShape])
         lsDataCode.append(nCode)
     return lsDataCode, arrDataShape
+    
     
 if __name__ == "__main__":
     dSamplingFreq = 100.0
