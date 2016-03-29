@@ -20,20 +20,19 @@ import math
 from collections import deque
 import itertools
 
-USER_BER_SRC = 'user_ber_src'
-ATTACKER_BER_SRC = 'attacker_ber_src'
-
-USER_BER_EC = 'user_ber_ec'
-ATTACKER_BER_EC = 'attacker_ber_ec'
-
-USER_ERR_SRC = 'user_err_src'
-ATTACKER_ERR_SRC = 'attacker_err_src'
-
-USER_ERR_EC = 'user_err_ec'
-ATTACKER_ERR_EC = 'attacker_err_ec'
+BER_USER_SRC = 'ber_user_src'
+BER_ATTACKER_SRC = 'ber_attacker_src'
+BER_USER_EC = 'ber_user_ec'
+BER_ATTACKER_EC = 'ber_attacker_ec'
+ERR_USER_SRC = 'err_user_src'
+ERR_ATTACKER_SRC = 'err_attacker_src'
+ERR_USER_EC = 'err_user_ec'
+ERR_ATTACKER_EC = 'err_attacker_ec'
 
 CODE_LEN_SRC = 'code_len_src'
 CODE_LEN_EC = 'code_len_ec'
+
+ENTROPY = 'entropy'
 
 ATTACKER = 'attacker'
 USER = 'user'
@@ -44,12 +43,14 @@ M = 'm'
 K = 'k'
 R = 'r'
 CODER = 'coder'
-KN_RATIO = 'nk_ratio'
+KN_RATIO = 'kn_ratio'
+WND_RECT = 'wnd_rect' # wnd size of EMG rectification
+WND_SM = 'wnd_sm' # wnd size of smoothing
+WND_SC = 'wnd_sc' # wnd size of shape coding
 
 
 lsRGB = ['r', 'g', 'b']
 lsCMYK = ['c', 'm', 'y']
-
 
 RECTIFY_ARV = 'ARV'
 RECTIFY_RMS = 'RMS'
@@ -69,18 +70,9 @@ BER = 'BER'
 ERROR_COUNT = 'error_count'
 
 
-dcSegments = {\
-'ww_20160120_220524': [(500, 3700), (5100, 8300), (10000, 12400)],
-'ww_20160120_220358': [(650, 4000), (5100, 8800), (10000, 13500)],
-'ww_20160120_220245': [(900, 4300), (5100, 8300), (9500, 12700)],
-'ww_20160120_220126': [(750, 4600), (5800, 9500), (11100, 16000)],
-'ww_20160120_220019': [(670, 3080), (4100, 7200), (8700, 12200)] }
-
-
 def computeMeanFrequency(arrPSD, arrFreqIndex):
     dMeanFreq = np.sum(arrPSD.dot(arrFreqIndex))*1.0 / np.sum(arrPSD)
     return dMeanFreq
-    
     
 def computeMedianFrequency(arrPSD, arrFreqIndex):
     dMedianFreq = None
@@ -96,7 +88,6 @@ def computeMedianFrequency(arrPSD, arrFreqIndex):
         elif(dSum > dMedian):
             dMedianFreq = (arrFreqIndex[i-1]+arrFreqIndex[i])/2.0
             break
-        
     return dMedianFreq
 
 def RMS(arrData):
@@ -233,13 +224,59 @@ def loadData(strWorkingDir, strFileName, lsColumnNames, strFileExt = ''):
 
     return dfData_filtered
     
+def computeSymbolEntropy(arrCode):
+    srValueCnt = pd.value_counts(arrCode)
+    nTotal = len(arrCode)
+    srProb = srValueCnt*1.0/nTotal
+    dEntropy = -1.0 * \
+        (srProb.multiply(srProb.apply(math.log, args=(2, ) ) ) ).sum()
+    return dEntropy
+    
      
-def evaluateSingleData(strWorkingDir, strFileName, 
-                       eng, strCoder, m, r, n, k,
+def evaluateSingleData(strWorkingDir, strFileName,
+                       dRectDuration = 2.0, dSMDuration=2.0, dSCDuration=0.1,
+                       eng=None, strCoder=ecc.CODER_RS, 
+                       m=4, r=5, n=15, k=5, nInterleaving=20,
+                       bSourceEncoding=True, bReconciliation=True,
+                       bOutputaData = False, lsOutputData = None,
                        bPlot=False):
     """
-        Given the values of parameters, test performance on single data
+        Given the values of parameters, evaluate the performance of secret key
+        generation.
+        
+        Parameters:
+        ----------
+        strWorkingDir:
+            data directory
+        strFileName:
+            data file name
+        dRectDuration:
+            the duration of EMG rectification
+        dSMDuration:
+            the duration of smoothing function
+        dSCDuration:
+            the wnd duration of shape coding
+        eng:
+            matlab engine instance
+        strCoder:
+            name of error correction code
+        m:
+            number of bits per symbol (only for RS coder)
+        r:
+            maximal error bits
+        n:
+            length of code word
+        k:
+            length of code
+        bPlot:
+            plot the EMG signal if it is true
+        
+        Returns:
+        ----------
+        dcDataResult:
+            a diction contains evaluate results
     """
+    # save the param setting
     dcDataResult = {}
     dcDataResult[FILE_NAME] = strFileName
     dcDataResult[M] = m
@@ -248,16 +285,20 @@ def evaluateSingleData(strWorkingDir, strFileName,
     dcDataResult[K] = k
     dcDataResult[KN_RATIO] = k*1.0/n
     dcDataResult[CODER] = strCoder
+    dcDataResult[WND_RECT] = dRectDuration
+    dcDataResult[WND_SM] = dSMDuration
+    dcDataResult[WND_SC] = dSCDuration
+    
     
 #==============================================================================
 # load data
 #==============================================================================
+    # ---- setup----
     dSamplingFreq = 240.0
     lsColumnNames = ['ch0', 'ch1', 'ch2']
     
     dfData = loadData(strWorkingDir, strFileName, lsColumnNames)
     
-    # ---- setup----
     lsColumns2Inspect = ['ch0','ch1', 'ch2']
     
 #==============================================================================
@@ -265,23 +306,23 @@ def evaluateSingleData(strWorkingDir, strFileName,
 #==============================================================================
     # ---- raw ----
     nRawStart, nRawEnd = 0, -1
-    print "--%s: [%d:%d]--" % (strFileName, nRawStart, nRawEnd)
+    print "-->%s: [%d:%d]" % (strFileName, nRawStart, nRawEnd)
     lsData_raw = []
     for col in lsColumns2Inspect:
         arrData = dfData[col].iloc[nRawStart: nRawEnd]
         lsData_raw.append(arrData)
         
-    # ---- fft ----
-    nSamples_fft = len(lsData_raw[0])
-    dRes_fft = dSamplingFreq*1.0/nSamples_fft
-    lsData_fft = []
-    for arrData in lsData_raw:
-        arrFFT = fftpack.fft(arrData)
-        arrPSD = np.sqrt(abs(arrFFT)**2.0/(nSamples_fft*1.0))
-        lsData_fft.append(arrPSD)
+#    # ---- fft ----
+#    nSamples_fft = len(lsData_raw[0])
+#    dRes_fft = dSamplingFreq*1.0/nSamples_fft
+#    lsData_fft = []
+#    for arrData in lsData_raw:
+#        arrFFT = fftpack.fft(arrData)
+#        arrPSD = np.sqrt(abs(arrFFT)**2.0/(nSamples_fft*1.0))
+#        lsData_fft.append(arrPSD)
         
     # ---- filtered ----
-    nLowCut, nHighCut = 5, 45
+    nLowCut = 5
     dPowerInterference = 50.0
     nFilterOrder = 9
     nFilterShift = int(0.5 *dSamplingFreq)
@@ -300,18 +341,18 @@ def evaluateSingleData(strWorkingDir, strFileName,
                                                 order=nFilterOrder)
         lsData_filtered.append(arrFiltered[nFilterShift:])
         
-    # ---- fft on filtered ----
-    nSamples_fft_filtered = len(lsData_filtered[0])
-    dRes_fft_filtered = dSamplingFreq*1.0/nSamples_fft_filtered
-    lsData_fft_filtered = []
-    for arrFiltered in lsData_filtered:
-        arrFFT = fftpack.fft(arrFiltered)
-        arrPSD = np.sqrt(abs(arrFFT)**2.0/(nSamples_fft_filtered*1.0))
-        lsData_fft_filtered.append(arrPSD)
+        
+#    # ---- fft on filtered ----
+#    nSamples_fft_filtered = len(lsData_filtered[0])
+#    dRes_fft_filtered = dSamplingFreq*1.0/nSamples_fft_filtered
+#    lsData_fft_filtered = []
+#    for arrFiltered in lsData_filtered:
+#        arrFFT = fftpack.fft(arrFiltered)
+#        arrPSD = np.sqrt(abs(arrFFT)**2.0/(nSamples_fft_filtered*1.0))
+#        lsData_fft_filtered.append(arrPSD)
         
     # ---- rectify data ----
-    dRectDuration = 0.9
-    nSmoothingWnd = int(1.5* dSamplingFreq)
+    nSmoothingWnd = int(dSMDuration* dSamplingFreq)
     lsData_rectified = []
     for arrData in lsData_filtered:
         arrRect = rectifyEMG(arrData, dSamplingFreq, 
@@ -322,58 +363,58 @@ def evaluateSingleData(strWorkingDir, strFileName,
                                      
         lsData_rectified.append(arrRect_sm)
         
-    # ---- find extrema of data ----
-    nExtremaWnd = int(0.5*dSamplingFreq)
-    lsData_extrema = []
-    for arrData in lsData_rectified:
-        arrExtreInd = dt.findExtrema(arrData, nExtremaWnd)
-        lsData_extrema.append(arrExtreInd)
         
+       
     # ---- statistics of data ----
-    nCodingWndSize = int(0.2*dSamplingFreq)
+    nSCWndSize = int(dSCDuration*dSamplingFreq)
     dcData_stat = {}
     for i in xrange(len(lsData_rectified)):
         arrData1 = lsData_rectified[i]
         arrData2 = lsData_rectified[(i+1)%len(lsData_rectified)]
         dCorr = dt.slidingCorrelation(arrData1, arrData2,
-                                       nWndSize=nCodingWndSize)
+                                       nWndSize=nSCWndSize)
         dcData_stat["%d-%d" % (i, (i+1)%len(lsData_rectified)) ] = dCorr
+    
+    # ---- output data ----    
+    if(bOutputaData is True and lsOutputData is not None):
+        dfOutput = pd.DataFrame(lsData_raw).T
+        lsOutputData.append(dfOutput)
         
     # ---- coding ----
-    bSourceEncoding = True
-    bReconciliation = True
     if(bSourceEncoding):
         # source encoding
         lsSourceCode = []           # source code in binary
         lsSourceShape = []          # shape of source
+        nNeighborWnd = 3
         for i, arrData in enumerate(lsData_rectified):
-            lsCode, arrSourceShape = encoder.shapeEncoding(arrData,
-                                                     nCodingWndSize, 5)
-            arrSourceCode = np.array(lsCode)
-            arrSourceCode_bin = ct.toBinaryArray(arrSourceCode)
-            lsSourceCode.append(arrSourceCode_bin)
-            lsSourceShape.append(arrSourceShape)
-            dcDataResult[CODE_LEN_SRC] = len(arrSourceCode_bin)
+            lsDataSrcCode, arrDataShape = encoder.shapeEncoding(arrData,
+                                                     nSCWndSize, nNeighborWnd)
+            arrDataSrcCode = np.array(lsDataSrcCode)
+            dEntropy = computeSymbolEntropy(arrDataSrcCode)
+            dcDataResult[ENTROPY] = dEntropy
+            arrDataSrcCode_bin = ct.toBinaryArray(arrDataSrcCode, 2)
+            lsSourceCode.append(arrDataSrcCode_bin)
+            lsSourceShape.append(arrDataShape)
+            dcDataResult[CODE_LEN_SRC] = len(arrDataSrcCode_bin)
             
         # reconciliation
         dcReconciliation = {}
         if(bReconciliation):
             nPadding = n*m if strCoder==ecc.CODER_RS else n
-            nInterleavingSize = 10
  
             for i in [DATA_ID_HAND, DATA_ID_ATTACKER]:
                 # compute delta
                 arrData_bin_1 = np.copy(lsSourceCode[i])
                 arrData_bin_1, nPd = ct.interleave(arrData_bin_1,
-                                                   nBuckets=nInterleavingSize)
+                                                   nInterleaving)
                 arrData_bin_1, nPd = ct.zeroPadding(arrData_bin_1, nPadding)
                 arrDelta = ecc.computeDelta(eng, arrData_bin_1, 
                                             n, k, m, strCoder)
                                             
                 # reconciliation
                 arrData_bin_2 = np.copy(lsSourceCode[DATA_ID_PAYEND])
-                arrData_bin_2, nPd = ct.interleave(arrData_bin_2,
-                                                   nBuckets=nInterleavingSize)
+                arrData_bin_2, nPd = ct.interleave(arrData_bin_2, 
+                                                   nInterleaving)
                 arrData_bin_2, nPd = ct.zeroPadding(arrData_bin_2, nPadding)
                 
                 arrDeduced_bin = ecc.reconciliate(eng, arrDelta,
@@ -392,30 +433,25 @@ def evaluateSingleData(strWorkingDir, strFileName,
                 arrSrcCode2 = lsSourceCode[DATA_ID_PAYEND]
                 nErrorBits_src, dBER_src =ct.computeBER(arrSrcCode1,
                                                         arrSrcCode2)
-#                print("src: BER(%d, %d)=%.3f, error=%d, len=%d" % \
-#                      (i, DATA_ID_PAYEND, dBER_src, \
-#                      nErrorBits_src, len(arrSrcCode1) ) )
-            
                 # after reconciliation
                 arrData_bin_1 = dcReconciliation[i][DATA_1]
                 arrDeduced_1 = dcReconciliation[i][DEDUCED_D1]
         
-                nErrorBits_recon, dBER_recon =ct.computeBER(arrData_bin_1,
+                nErrorBit_ec, dBER_ec =ct.computeBER(arrData_bin_1,
                                                             arrDeduced_1)
-#                print("rec: BER(%d, %d)=%.3f, error=%d, len=%d" % \
-#                      (i, DATA_ID_PAYEND, dBER_recon, \
-#                      nErrorBits_recon, len(arrDeduced_1) ) )
                 dcDataResult[CODE_LEN_EC] = len(arrDeduced_1)
                 if(i == DATA_ID_HAND):
-                    dcDataResult[USER_BER_SRC] = dBER_src
-                    dcDataResult[USER_BER_EC] = dBER_recon
-                    dcDataResult[USER_ERR_SRC] = nErrorBits_src
-                    dcDataResult[USER_ERR_EC] = nErrorBits_recon
+                    dcDataResult[BER_USER_SRC] = dBER_src
+                    dcDataResult[BER_USER_EC] = dBER_ec
+                    dcDataResult[ERR_USER_SRC] = nErrorBits_src
+                    dcDataResult[ERR_USER_EC] = nErrorBit_ec
+                elif (i == DATA_ID_ATTACKER):
+                    dcDataResult[BER_ATTACKER_SRC] = dBER_src
+                    dcDataResult[BER_ATTACKER_EC] = dBER_ec
+                    dcDataResult[ERR_ATTACKER_SRC] = nErrorBits_src
+                    dcDataResult[ERR_ATTACKER_EC] = nErrorBit_ec
                 else:
-                    dcDataResult[ATTACKER_BER_SRC] = dBER_src
-                    dcDataResult[ATTACKER_BER_EC] = dBER_recon
-                    dcDataResult[ATTACKER_ERR_SRC] = nErrorBits_src
-                    dcDataResult[ATTACKER_ERR_EC] = nErrorBits_recon
+                    raise ValueError("Unknown data id: %d" % i)
                         
 #==============================================================================
 # plot
@@ -486,31 +522,31 @@ def evaluateSingleData(strWorkingDir, strFileName,
                 
             nCurrentRow += 1
             
-        # ---- plot FFT ----
-        nDCEnd = 10
-        if (bPlotFFT is True):
-            for i, arrPSD in enumerate(lsData_fft):
-                arrFreqIndex = np.linspace(nDCEnd*dRes_fft, 
-                                           dSamplingFreq/2.0, 
-                                           nSamples_fft/2-nDCEnd)
-                                           
-                nRowID = nCurrentRow
-                nColID = i if bPlotSyncView is False else 0
-                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-                nVerticalShift = 0 if bPlotSyncView is False else (50*i)
-                axes[nRowID, nColID].plot(arrFreqIndex,
-                    arrPSD[nDCEnd:nSamples_fft/2]-nVerticalShift,
-                    color=lsRGB[i], alpha=dAlpha)
-                axes[nRowID, nColID].set_xticks(range(0, 
-                                                int(dSamplingFreq/2), 10) )
-                axes[nRowID, nColID].set_xlabel( \
-                    (lsColumns2Inspect[i]  if bPlotSyncView is False \
-                    else strSyncTitle ) +"(fft)" )
-                if (tpYLim_fft is not None):
-                    axes[nRowID, nColID].set_ylim(tpYLim_fft[0], tpYLim_fft[1])
-                axes[nRowID, nColID].grid('on')
-    
-            nCurrentRow += 1
+#        # ---- plot FFT ----
+#        nDCEnd = 10
+#        if (bPlotFFT is True):
+#            for i, arrPSD in enumerate(lsData_fft):
+#                arrFreqIndex = np.linspace(nDCEnd*dRes_fft, 
+#                                           dSamplingFreq/2.0, 
+#                                           nSamples_fft/2-nDCEnd)
+#                                           
+#                nRowID = nCurrentRow
+#                nColID = i if bPlotSyncView is False else 0
+#                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+#                nVerticalShift = 0 if bPlotSyncView is False else (50*i)
+#                axes[nRowID, nColID].plot(arrFreqIndex,
+#                    arrPSD[nDCEnd:nSamples_fft/2]-nVerticalShift,
+#                    color=lsRGB[i], alpha=dAlpha)
+#                axes[nRowID, nColID].set_xticks(range(0, 
+#                                                int(dSamplingFreq/2), 10) )
+#                axes[nRowID, nColID].set_xlabel( \
+#                    (lsColumns2Inspect[i]  if bPlotSyncView is False \
+#                    else strSyncTitle ) +"(fft)" )
+#                if (tpYLim_fft is not None):
+#                    axes[nRowID, nColID].set_ylim(tpYLim_fft[0], tpYLim_fft[1])
+#                axes[nRowID, nColID].grid('on')
+#    
+#            nCurrentRow += 1
                 
         # ---- plot filtered data ----
         if(bPlotFiltered is True):
@@ -532,34 +568,34 @@ def evaluateSingleData(strWorkingDir, strFileName,
                 axes[nRowID, nColID].grid('on')
             nCurrentRow += 1
             
-        # ---- plot FFT on filtered data ----
-        if (bPlotFFTonFiltered is True):
-            for i, arrPSD in enumerate(lsData_fft_filtered):
-                arrFreqIndex = np.linspace(nDCEnd*dRes_fft_filtered, 
-                                           dSamplingFreq/2.0, 
-                                           nSamples_fft_filtered/2-nDCEnd)
-                                           
-                nRowID = nCurrentRow
-                nColID = i if bPlotSyncView is False else 0
-                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-                nVerticalShift = 0 if bPlotSyncView is False else (30*i)
-                
-                axes[nRowID, nColID].plot(arrFreqIndex,
-                    pd.rolling_mean(\
-                        arrPSD[nDCEnd: int(nSamples_fft_filtered/2.0)] \
-                        -nVerticalShift, window=40, min_periods=1),
-                    color=lsRGB[i], alpha=dAlpha)
-                    
-                axes[nRowID, nColID].set_xticks(range(0, 
-                                                int(dSamplingFreq/2), 10) )
-                axes[nRowID, nColID].set_xlabel( \
-                    (lsColumns2Inspect[i]  if bPlotSyncView is False \
-                    else strSyncTitle ) +"(fft@filtered)")
-                if (tpYLim_fft_filtered is not None):
-                    axes[nRowID, nColID].set_ylim(tpYLim_fft_filtered[0], 
-                                                  tpYLim_fft_filtered[1])
-                axes[nRowID, nColID].grid('on')
-            nCurrentRow += 1
+#        # ---- plot FFT on filtered data ----
+#        if (bPlotFFTonFiltered is True):
+#            for i, arrPSD in enumerate(lsData_fft_filtered):
+#                arrFreqIndex = np.linspace(nDCEnd*dRes_fft_filtered, 
+#                                           dSamplingFreq/2.0, 
+#                                           nSamples_fft_filtered/2-nDCEnd)
+#                                           
+#                nRowID = nCurrentRow
+#                nColID = i if bPlotSyncView is False else 0
+#                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+#                nVerticalShift = 0 if bPlotSyncView is False else (30*i)
+#                
+#                axes[nRowID, nColID].plot(arrFreqIndex,
+#                    pd.rolling_mean(\
+#                        arrPSD[nDCEnd: int(nSamples_fft_filtered/2.0)] \
+#                        -nVerticalShift, window=40, min_periods=1),
+#                    color=lsRGB[i], alpha=dAlpha)
+#                    
+#                axes[nRowID, nColID].set_xticks(range(0, 
+#                                                int(dSamplingFreq/2), 10) )
+#                axes[nRowID, nColID].set_xlabel( \
+#                    (lsColumns2Inspect[i]  if bPlotSyncView is False \
+#                    else strSyncTitle ) +"(fft@filtered)")
+#                if (tpYLim_fft_filtered is not None):
+#                    axes[nRowID, nColID].set_ylim(tpYLim_fft_filtered[0], 
+#                                                  tpYLim_fft_filtered[1])
+#                axes[nRowID, nColID].grid('on')
+#            nCurrentRow += 1
         
         
         # ---- plot rectified data ----
@@ -591,7 +627,7 @@ def evaluateSingleData(strWorkingDir, strFileName,
                 # plot auxiliary line
                 if(bPlotAuxiliaryLine is True):
                     #coding wnd line
-                    for ln in xrange(0, len(arrData), nCodingWndSize):
+                    for ln in xrange(0, len(arrData), nSCWndSize):
                         axes[nRowID, nColID].axvline(ln, color='k', 
                                                      ls='-.', alpha=0.3)
                 
@@ -605,17 +641,6 @@ def evaluateSingleData(strWorkingDir, strFileName,
                         xycoords='axes fraction',
                         horizontalalignment='center',
                         verticalalignment='center')
-                        
-                # anatation: extrema
-                if(bAnnotateExtrema is True ):
-                    arrExtremaInd = lsData_extrema[i]
-                    for ind in arrExtremaInd:
-                        axes[nRowID, nColID].annotate("e%d"%i, 
-                            xy=(ind, arrData[ind]), 
-                            xytext=(ind, arrData[ind]+3),
-                            arrowprops=dict(facecolor=lsRGB[i], color=lsRGB[i],
-                                            shrink=0.05,
-                                            headwidth=5, width=0.5))
             nCurrentRow += 1
             
     
@@ -624,6 +649,7 @@ def evaluateSingleData(strWorkingDir, strFileName,
         plt.show()
         
     return dcDataResult
+        
     
     
 if __name__ == '__main__':
@@ -635,18 +661,27 @@ if __name__ == '__main__':
     
     # setup
     strWorkingDir = "../../data/feasibility/with_attacker/"
-    strFileName = 'yl_ww_20160224_210921.txt'
+    strFileName = 'yl_ww_20160224_210736.txt'
     
-    strCoder = ecc.CODER_RS
-    m = 3    
-    n = 7
-    k = 3
+    strCoder = ecc.CODER_GOLAY
+    m = 1    
+    n = 23
+    k = 12
     r = int(math.floor((n-k)/2.0) )
+    nInterleaving = 25
+    print "%s: n=%d, k=%d, m=%d, r=%d, interlv=%d" % \
+            (strCoder, n, k, m, r, nInterleaving)
     
-    # evaluate                          
-    dcDataResult = evaluateSingleData(strWorkingDir, strFileName, eng, 
-                                      strCoder, m, r, n, k, bPlot=False)
+    # evaluate
+    lsOutput = []                     
+    dcDataResult = evaluateSingleData(strWorkingDir, strFileName,
+                      dRectDuration=2.0, dSMDuration=2.0, dSCDuration=0.1,
+                      eng=eng, strCoder=strCoder, 
+                      m=m, r=r, n=n, k=k, nInterleaving = nInterleaving,
+                      bSourceEncoding=False, bReconciliation=False,
+                      bOutputaData=True, lsOutputData=lsOutput,
+                      bPlot=True)
     
        
-    print dcDataResult
+    print pd.Series(dcDataResult)
     

@@ -196,14 +196,14 @@ def main():
     ser = None
     try:
         # setup 
-        nPort = int(sys.argv[1])
+        strPort = sys.argv[1]
         nChannel = int(sys.argv[2])
         nBaudRate = 57600
         strDataPath = "../../data/"
         
         # open serial port
-        print("Try to open COM %d..." % nPort)
-        ser = serial.Serial(nPort, nBaudRate)
+        print("Try to open serial %s ..." % strPort)
+        ser = serial.Serial(strPort, nBaudRate)
         print("Serial %s is open." % ser.name)
         
         # create & start rx thread

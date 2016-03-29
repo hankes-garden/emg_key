@@ -13,8 +13,7 @@ import pdb
 import numpy as np
 
 
-FLAT_PATTERN_THRESHOLD = 0.2
-FLAT_PATTERN_RANGE = 0.5
+FLAT_PATTERN_STD = 0.05
 
 SHAPE_CODE_INCREASE = 1
 SHAPE_CODE_DECREASE = 2
@@ -29,8 +28,7 @@ def generateShapeTemplates(nLen, dRange, dPeakRatio = 1.0):
     """
     dMin = 0.0
     dMax = dMin + dRange
-#    arrFlat = np.array([dMin+dRange/2.0,]*nLen)
-    arrFlat = np.zeros(nLen)
+    arrFlat = np.array([dMin,]*nLen)
     arrIncrease = np.array([dMin+i*dRange/nLen for i in xrange(nLen)] )
     arrDecrease = np.array([dMax-i*dRange/nLen for i in xrange(nLen)] )
     lsConcave = [dMin+dRange*dPeakRatio - dPeakRatio*i*2.0*dRange/nLen \
@@ -49,7 +47,8 @@ def generateShapeTemplates(nLen, dRange, dPeakRatio = 1.0):
         lsConvex.append(dMin)
     arrConvex = np.array(lsConvex)
     
-    return {SHAPE_CODE_INCREASE: arrIncrease, 
+    return {SHAPE_CODE_FLAT: arrFlat,
+            SHAPE_CODE_INCREASE: arrIncrease, 
             SHAPE_CODE_DECREASE: arrDecrease}
             
             
@@ -86,29 +85,29 @@ def shapeEncoding(arrData, nCodingWndSize, nNeighbors=3):
             # forget about the last segment if it is shorter than nWndSize
             break
         
-        arrWndData = arrData[nStartIndex:nEndIndex]
+        arrWndData = arrData[nStartIndex: nEndIndex]
         arrWndData_shift = arrWndData - np.min(arrWndData) # remove base line
         
-        # find nearby windows
-        nNeighborStart, nNeighborEnd = None, None
-        if (nStartIndex-(nNeighbors-1)/2*nCodingWndSize <= 0):
-            nNeighborStart = 0
-            nNeighborEnd = min(len(arrData), 
-                               nNeighborStart + nNeighbors*nCodingWndSize)
-        elif (nEndIndex + (nNeighbors-1)/2*nCodingWndSize >= nDataLen):
-            nNeighborEnd = len(arrData)
-            nNeighborStart = max(0, nNeighborEnd-nNeighbors*nCodingWndSize)
-        else:
-            nNeighborStart = max(0,\
-                                 nStartIndex-(nNeighbors-1)/2*nCodingWndSize)
-            nNeighborEnd = min(len(arrData), 
-                               nNeighborStart + nNeighbors*nCodingWndSize)
-        # compute the max range of neighbors                    
-        dMaxNeighborRange = 0.0
-        for s in xrange(nNeighborStart, nNeighborEnd, nCodingWndSize):
-            dRange = np.ptp(arrData[s:s+nCodingWndSize])
-            if(dRange >= dMaxNeighborRange):
-                dMaxNeighborRange = dRange
+#        # find nearby windows
+#        nNeighborStart, nNeighborEnd = None, None
+#        if (nStartIndex-(nNeighbors-1)/2*nCodingWndSize <= 0):
+#            nNeighborStart = 0
+#            nNeighborEnd = min(len(arrData), 
+#                               nNeighborStart + nNeighbors*nCodingWndSize)
+#        elif (nEndIndex + (nNeighbors-1)/2*nCodingWndSize >= nDataLen):
+#            nNeighborEnd = len(arrData)
+#            nNeighborStart = max(0, nNeighborEnd-nNeighbors*nCodingWndSize)
+#        else:
+#            nNeighborStart = max(0,\
+#                                 nStartIndex-(nNeighbors-1)/2*nCodingWndSize)
+#            nNeighborEnd = min(len(arrData), 
+#                               nNeighborStart + nNeighbors*nCodingWndSize)
+#        # compute the max range of neighbors    
+#        dMaxNeighborRange = 0.0
+#        for s in xrange(nNeighborStart, nNeighborEnd, nCodingWndSize):
+#            dRange = np.ptp(arrData[s:s+nCodingWndSize])
+#            if(dRange >= dMaxNeighborRange):
+#                dMaxNeighborRange = dRange
             
         # generate patterns
         dcPatterns = generateShapeTemplates(nCodingWndSize, 
@@ -120,9 +119,9 @@ def shapeEncoding(arrData, nCodingWndSize, nNeighbors=3):
             nStartIndex <= nDebugIndex and nEndIndex > nDebugIndex):
             pdb.set_trace()        
         
+        # find nearest pattern
         nCode = None
-        if(np.ptp(arrWndData_shift) < FLAT_PATTERN_RANGE):
-#        if(np.std(arrWndData_shift) <= FLAT_PATTERN_THRESHOLD ):
+        if(np.std(arrWndData_shift) <= FLAT_PATTERN_STD ):
             nCode = SHAPE_CODE_FLAT
             arrWndShape = np.zeros(nCodingWndSize)
         else:

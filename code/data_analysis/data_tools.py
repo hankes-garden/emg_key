@@ -6,6 +6,7 @@ Created on Fri Mar 11 11:04:54 2016
 
 @author: jason
 """
+from sklearn.metrics import mutual_info_score
 import numpy as np
 import pandas as pd
 from scipy.signal import argrelextrema
@@ -40,6 +41,12 @@ def normalizedCrossCorr(arrData0, arrData1):
     dCorr = arrNormCrossCorr[nMaxIndex]
     nLag = nMaxIndex - len(arrData0)
     return dCorr, nLag, arrNormCrossCorr
+    
+
+def calc_MI(x, y, bins):
+    c_xy = np.histogram2d(x, y, bins)[0]
+    mi = mutual_info_score(None, None, contingency=c_xy)
+    return mi
     
 
 def slidingCorrelation(arrData1, arrData2, nWndSize):

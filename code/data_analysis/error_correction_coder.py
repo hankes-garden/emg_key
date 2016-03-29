@@ -28,6 +28,34 @@ CODER_GOLAY = 'golay23'
 CODER_HAMMING = 'hamming/binary'
 CODER_RS = 'reed_solomon'
 
+INTRLV_MATRIX = 'matrix_interleaving'
+INTRLV_RANDOM = 'random_interleaving'
+
+
+def interleave(eng, arrData_bin, nParam, strMethod=INTRLV_MATRIX):
+    """
+        interleave data in a block way
+    """
+
+    data_intrlv = None
+    nPadding = None
+    if(strMethod == INTRLV_MATRIX):
+        nCols = nParam
+        arrData_bin, nPadding = ct.zeroPadding(arrData_bin, nCols)   
+        nRows = len(arrData_bin)/nCols
+        data = matlab.int64(list(arrData_bin))
+        data_intrlv = eng.matintrlv(data, nRows, nCols)
+    elif(strMethod == INTRLV_RANDOM):
+        nSeed = 4831
+        data = matlab.int64(list(arrData_bin))
+        data_intrlv = eng.randintrlv(data, nSeed)
+    else:
+        raise ValueError("Unsupported interleaving method: %s" % strMethod)
+        
+        
+    arrData_intrlv = np.array([i for i in data_intrlv[0]])
+    return arrData_intrlv, nPadding
+
 def repetitiveDecode(arrEncoded, k):
     """
         error correction via repetive coding
@@ -70,6 +98,8 @@ def computeDelta(matlabEng, arrData_bin_1, n, k, m, strCoder):
     arrCodeword_bin_1 = None
 
     if(strCoder == CODER_GOLAY):
+        n = 23
+        k = 12
         arrMsg_bin_1 = golay.decode(matlabEng, arrData_bin_1, n)
         arrCodeword_bin_1 = golay.encode(matlabEng, arrMsg_bin_1, k)
     elif (strCoder == CODER_RS):
@@ -96,6 +126,8 @@ def reconciliate(matlabEng, arrDelta, arrData_bin_2, n, k, m, strCoder):
     arrCodeword_bin_2 = None    
     
     if (strCoder == CODER_GOLAY):
+        n = 23
+        k = 12
         arrMsg_bin_2 = golay.decode(matlabEng, 
                                     np.bitwise_xor(arrData_bin_2, arrDelta),
                                     n)
@@ -244,8 +276,9 @@ if __name__ == '__main__':
     n = 2**m -1
     k = 9
     r = math.ceil((n-k)/2.0)
+    strCoder = CODER_RS
     print "max error number = ", r
         
     
-    test_reconciliation(100, eng, nKeySize=200, nErrorBits=int(r)+2, 
-                        n=n, k=k, m=m, strCoder=CODER_RS)
+    test_reconciliation(100, eng, nKeySize=350, nErrorBits=22, 
+                        n=n, k=k, m=m, strCoder=strCoder)

@@ -3,6 +3,7 @@ presentation/
 paper/
 code/reference/
 code/data_analysis/test.py
+data/
 desktop.ini
 *.xmind
 *.pyc
