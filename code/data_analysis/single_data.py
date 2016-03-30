@@ -325,7 +325,7 @@ def evaluateSingleData(strWorkingDir, strFileName,
     nLowCut = 5
     dPowerInterference = 50.0
     nFilterOrder = 9
-    nFilterShift = int(0.5 *dSamplingFreq)
+    nFilterShift = int(0.7 *dSamplingFreq)
     lsData_filtered = []
     for arrData in lsData_raw:
         # remove power line inteference
@@ -363,37 +363,23 @@ def evaluateSingleData(strWorkingDir, strFileName,
                                      
         lsData_rectified.append(arrRect_sm)
         
-        
-       
-    # ---- statistics of data ----
-    nSCWndSize = int(dSCDuration*dSamplingFreq)
-    dcData_stat = {}
-    for i in xrange(len(lsData_rectified)):
-        arrData1 = lsData_rectified[i]
-        arrData2 = lsData_rectified[(i+1)%len(lsData_rectified)]
-        dCorr = dt.slidingCorrelation(arrData1, arrData2,
-                                       nWndSize=nSCWndSize)
-        dcData_stat["%d-%d" % (i, (i+1)%len(lsData_rectified)) ] = dCorr
-    
-    # ---- output data ----    
-    if(bOutputaData is True and lsOutputData is not None):
-        dfOutput = pd.DataFrame(lsData_raw).T
-        lsOutputData.append(dfOutput)
-        
     # ---- coding ----
+    nSCWndSize = int(dSCDuration*dSamplingFreq)
+    lsSourceCode = []               # source code
+    lsSourceCode_bin = []           # source code in binary
+    lsSourceShape = []              # shape of source
     if(bSourceEncoding):
         # source encoding
-        lsSourceCode = []           # source code in binary
-        lsSourceShape = []          # shape of source
         nNeighborWnd = 3
         for i, arrData in enumerate(lsData_rectified):
             lsDataSrcCode, arrDataShape = encoder.shapeEncoding(arrData,
                                                      nSCWndSize, nNeighborWnd)
             arrDataSrcCode = np.array(lsDataSrcCode)
+            lsSourceCode.append(arrDataSrcCode)
             dEntropy = computeSymbolEntropy(arrDataSrcCode)
             dcDataResult[ENTROPY] = dEntropy
             arrDataSrcCode_bin = ct.toBinaryArray(arrDataSrcCode, 2)
-            lsSourceCode.append(arrDataSrcCode_bin)
+            lsSourceCode_bin.append(arrDataSrcCode_bin)
             lsSourceShape.append(arrDataShape)
             dcDataResult[CODE_LEN_SRC] = len(arrDataSrcCode_bin)
             
@@ -404,7 +390,7 @@ def evaluateSingleData(strWorkingDir, strFileName,
  
             for i in [DATA_ID_HAND, DATA_ID_ATTACKER]:
                 # compute delta
-                arrData_bin_1 = np.copy(lsSourceCode[i])
+                arrData_bin_1 = np.copy(lsSourceCode_bin[i])
                 arrData_bin_1, nPd = ct.interleave(arrData_bin_1,
                                                    nInterleaving)
                 arrData_bin_1, nPd = ct.zeroPadding(arrData_bin_1, nPadding)
@@ -412,7 +398,7 @@ def evaluateSingleData(strWorkingDir, strFileName,
                                             n, k, m, strCoder)
                                             
                 # reconciliation
-                arrData_bin_2 = np.copy(lsSourceCode[DATA_ID_PAYEND])
+                arrData_bin_2 = np.copy(lsSourceCode_bin[DATA_ID_PAYEND])
                 arrData_bin_2, nPd = ct.interleave(arrData_bin_2, 
                                                    nInterleaving)
                 arrData_bin_2, nPd = ct.zeroPadding(arrData_bin_2, nPadding)
@@ -429,8 +415,8 @@ def evaluateSingleData(strWorkingDir, strFileName,
             # coding performance    
             for i in [DATA_ID_HAND, DATA_ID_ATTACKER]:
                 # before reconciliation
-                arrSrcCode1 = lsSourceCode[i]
-                arrSrcCode2 = lsSourceCode[DATA_ID_PAYEND]
+                arrSrcCode1 = lsSourceCode_bin[i]
+                arrSrcCode2 = lsSourceCode_bin[DATA_ID_PAYEND]
                 nErrorBits_src, dBER_src =ct.computeBER(arrSrcCode1,
                                                         arrSrcCode2)
                 # after reconciliation
@@ -452,7 +438,22 @@ def evaluateSingleData(strWorkingDir, strFileName,
                     dcDataResult[ERR_ATTACKER_EC] = nErrorBit_ec
                 else:
                     raise ValueError("Unknown data id: %d" % i)
+                    
+    # ---- statistics of data ----
+    dcData_stat = {}
+    for i in xrange(len(lsSourceCode)):
+        arrData1 = lsSourceCode[i]
+        arrData2 = lsSourceCode[(i+1)%len(lsSourceCode)]
+        dMI = dt.computeMI(arrData1, arrData2, 5)
+        dcData_stat["%d-%d" % (i, (i+1)%len(lsSourceCode)) ] = dMI
+    
+#    print dcData_stat
                         
+    # ---- output data ----    
+    if(bOutputaData is True and lsOutputData is not None):
+        dfOutput = pd.DataFrame(lsData_filtered).T
+        lsOutputData.append(dfOutput)
+        
 #==============================================================================
 # plot
 #==============================================================================
@@ -660,8 +661,8 @@ if __name__ == '__main__':
         print "matlab engine is already existed."
     
     # setup
-    strWorkingDir = "../../data/feasibility/with_attacker/"
-    strFileName = 'yl_ww_20160224_210736.txt'
+    strWorkingDir = "../../data/evaluation/selected_set/"
+    strFileName = 'zy_d1_g1_c1_20160329_212344.txt'
     
     strCoder = ecc.CODER_GOLAY
     m = 1    
@@ -675,10 +676,10 @@ if __name__ == '__main__':
     # evaluate
     lsOutput = []                     
     dcDataResult = evaluateSingleData(strWorkingDir, strFileName,
-                      dRectDuration=2.0, dSMDuration=2.0, dSCDuration=0.1,
+                      dRectDuration=1.5, dSMDuration=2.0, dSCDuration=0.15,
                       eng=eng, strCoder=strCoder, 
                       m=m, r=r, n=n, k=k, nInterleaving = nInterleaving,
-                      bSourceEncoding=False, bReconciliation=False,
+                      bSourceEncoding=True, bReconciliation=True,
                       bOutputaData=True, lsOutputData=lsOutput,
                       bPlot=True)
     

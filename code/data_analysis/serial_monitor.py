@@ -27,7 +27,7 @@ g_dataQueue = deque(maxlen=MAX_PLOT_BUFF_SIZE)  # rx buffer
 g_dataRxEvent = Event()                         # rx event
 g_dataWrittingEvent = Event()                   # writting event
 g_dataQueueLock = Lock()                        # lock for rx buffer
-g_lsColors = ['r', 'b', 'g', 'c', 'm', 'k']
+g_lsColors = ['r', 'g', 'b', 'c', 'm', 'k']
 
 def checkDataFormat(arrValues):
     bValid = True

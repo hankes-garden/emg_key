@@ -43,10 +43,31 @@ def normalizedCrossCorr(arrData0, arrData1):
     return dCorr, nLag, arrNormCrossCorr
     
 
-def calc_MI(x, y, bins):
-    c_xy = np.histogram2d(x, y, bins)[0]
+def computeMI(x, y, bins, arrRange=None):
+    c_xy = np.histogram2d(x, y, bins, arrRange)[0]
     mi = mutual_info_score(None, None, contingency=c_xy)
-    return mi
+    return mi/np.log(2)
+    
+
+#def computeMI(X,Y,bins):
+#
+#   c_XY = np.histogram2d(X,Y,bins)[0]
+#   c_X = np.histogram(X,bins)[0]
+#   c_Y = np.histogram(Y,bins)[0]
+#
+#   H_X = shannonEntropy(c_X)
+#   H_Y = shannonEntropy(c_Y)
+#   H_XY = shannonEntropy(c_XY)
+#
+#   MI = H_X + H_Y - H_XY
+#   return MI
+
+def shannonEntropy(c):
+    c_normalized = c / float(np.sum(c))
+    c_normalized = c_normalized[np.nonzero(c_normalized)]
+    H = -sum(c_normalized* np.log2(c_normalized))  
+    return H
+    
     
 
 def slidingCorrelation(arrData1, arrData2, nWndSize):
@@ -63,3 +84,10 @@ def slidingCorrelation(arrData1, arrData2, nWndSize):
         dTotalCorr += dCorr
     dTotalCorr = dTotalCorr * nWndSize / nLen
     return dTotalCorr
+    
+if __name__ == '__main__':
+    a = np.random.randint(0, 500, 100)
+    b = np.random.randint(0, 500, 100)
+    print computeMI(a, a, 5)
+    print computeMI(b, b, 5)
+    print computeMI(a, b, 5)

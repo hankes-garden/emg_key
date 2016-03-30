@@ -13,7 +13,7 @@ import pdb
 import numpy as np
 
 
-FLAT_PATTERN_STD = 0.05
+FLAT_PATTERN_STD = 0.002
 
 SHAPE_CODE_INCREASE = 1
 SHAPE_CODE_DECREASE = 2
@@ -52,7 +52,7 @@ def generateShapeTemplates(nLen, dRange, dPeakRatio = 1.0):
             SHAPE_CODE_DECREASE: arrDecrease}
             
             
-def shapeEncoding(arrData, nCodingWndSize, nNeighbors=3):
+def shapeEncoding(arrData_raw, nCodingWndSize, nNeighbors=3):
     '''
         souce encoding according to signal shape
         
@@ -77,7 +77,8 @@ def shapeEncoding(arrData, nCodingWndSize, nNeighbors=3):
     lsDataCode = []
     arrDataShape = None
     arrWndShape = None
-    nDataLen = len(arrData)
+    nDataLen = len(arrData_raw)
+    arrData = arrData_raw / np.max(arrData_raw)
     
     for nStartIndex in xrange(0, nDataLen, nCodingWndSize):
         nEndIndex = nStartIndex + nCodingWndSize

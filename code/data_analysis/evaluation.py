@@ -7,6 +7,7 @@ This script evaluate the performance of EMG Key.
 import single_data as sd
 import error_correction_coder as ecc
 from tools import common_function as cf
+import data_tools as dt
 
 import numpy as np
 import pandas as pd
@@ -155,8 +156,10 @@ def evaluateDataSet(strLabel, strWorkingDir, lsFilePath,
         lsResult.append(dcDataResult)
     dfResult = pd.DataFrame(lsResult)
     srMean = dfResult.mean()
-    srMean.name = strLabel
-    return srMean, dfResult
+    srMean.name = strLabel+"_mean"
+    srStd = dfResult.std()
+    srStd.name = strLabel+"_std"
+    return srMean, srStd, dfResult
     
 def evaluateDistance(eng):
     """
@@ -181,7 +184,7 @@ def evaluateDistance(eng):
         strFileNamePattern= strLabel
         lsFilePath = cf.getFileList(strWorkingDir, strFileNamePattern)
         
-        srMean, dfDetailed = evaluateDataSet(strLabel, 
+        srMean, srStd, dfDetailed = evaluateDataSet(strLabel, 
                                              strWorkingDir, lsFilePath,
                                              dRectWnd, dSMWnd, dSCWnd,
                                              eng, strCoder, n, k, m, r,
@@ -223,7 +226,7 @@ def evaluateEletrodeLocation(eng):
         strFileNamePattern= strLabel
         lsFilePath = cf.getFileList(strWorkingDir, strFileNamePattern)
         if (len(lsFilePath) != 0 ):
-            srMean, dfDetailed = evaluateDataSet(strLabel, 
+            srMean, srStd, dfDetailed = evaluateDataSet(strLabel, 
                                                  strWorkingDir, lsFilePath,
                                                  dRectWnd, dSMWnd, dSCWnd,
                                                  eng, strCoder, 
@@ -264,7 +267,7 @@ def evaluateGesture(eng):
         strFileNamePattern= strLabel
         lsFilePath = cf.getFileList(strWorkingDir, strFileNamePattern)
         if (len(lsFilePath) != 0 ):
-            srMean, dfDetailed = evaluateDataSet(strLabel, 
+            srMean, srStd, dfDetailed = evaluateDataSet(strLabel, 
                                                  strWorkingDir, lsFilePath,
                                                  dRectWnd, dSMWnd, dSCWnd,
                                                  eng, strCoder, n, k, m, r,
@@ -300,12 +303,12 @@ def evaluateSpecificDataSet(eng):
     strWorkingDir = "../../data/evaluation/selected_set/"
     lsFilePath = cf.getFileList(strWorkingDir, None)
 
-    srMean, dfDetailed = evaluateDataSet('selected', 
+    srMean, srStd, dfDetailed = evaluateDataSet('selected', 
                                          strWorkingDir, lsFilePath,
                                          dRectWnd, dSMWnd, dSCWnd,
                                          eng, strCoder, n, k, m, r,
-                                         nInterleaving)
-    return srMean, dfDetailed
+                                         nInterleaving, bOutputData=False)
+    return srMean, srStd, dfDetailed
                                          
 def evaluateMutualInformation():
     """
@@ -315,9 +318,9 @@ def evaluateMutualInformation():
     lsFilePath = cf.getFileList(strWorkingDir, None)
 
     lsOutputData = []
-    srMean, dfDetailed = evaluateDataSet('selected', 
+    srMean, srStd, dfDetailed = evaluateDataSet('selected', 
                                          strWorkingDir, lsFilePath,
-                                         bSourceEncoding = False,
+                                         bSourceEncoding = True,
                                          bReconciliation = False,
                                          bOutputData=True,
                                          lsOutputData=lsOutputData)
@@ -332,11 +335,13 @@ if __name__ == '__main__':
     else:
         print "matlab engine is already existed."
     
-    strTarget = EV_MUTUAL_INFO
+    strTarget = EV_SP_SET
     dfResult = None
     
     if (strTarget == EV_SP_SET): # specific set
-        dfResult, dfDetailed = evaluateSpecificDataSet(eng)
+        srMean, srStd, dfDetailed = evaluateSpecificDataSet(eng)
+        print srMean
+        print srStd
         
     elif (strTarget == EV_BIT_RATE): # bit rate
         pass
@@ -358,4 +363,3 @@ if __name__ == '__main__':
         raise ValueError("Unkonw evaluation target: %s." % strTarget)
     
     
-    print dfResult
