@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import argrelextrema
 import scipy.stats as stats
+import math 
 
 def findExtrema(arrData, nWndSize=20):
     arrPeak = argrelextrema(arrData, np.greater, order=nWndSize)[0]
@@ -47,6 +48,29 @@ def computeMI(x, y, bins, arrRange=None):
     c_xy = np.histogram2d(x, y, bins, arrRange)[0]
     mi = mutual_info_score(None, None, contingency=c_xy)
     return mi/np.log(2)
+    
+def computeMutualInfo(arrX, arrY):
+    srX = pd.Series(arrX, name='X')
+    srY = pd.Series(arrY, name='Y')
+    df = pd.DataFrame([srX, srY]).T
+    
+    dPr_x_0 = srX.value_counts()[0] * 1.0 / srX.size
+    dPr_x_1 = srX.value_counts()[1] * 1.0 / srX.size
+    dPr_y_0 = srY.value_counts()[0] * 1.0 / srY.size
+    dPr_y_1 = srY.value_counts()[1] * 1.0 / srY.size
+    
+    dPr_x0_y0 = ( (df['X']==0) & (df['Y']==0) ).sum() *1.0 / srX.size
+    dPr_x0_y1 = ( (df['X']==0) & (df['Y']==1) ).sum() *1.0 / srX.size
+    dPr_x1_y0 = ( (df['X']==1) & (df['Y']==0) ).sum() *1.0 / srX.size
+    dPr_x1_y1 = ( (df['X']==1) & (df['Y']==1) ).sum() *1.0 / srX.size
+    
+    dMI = dPr_x0_y0 * math.log( dPr_x0_y0/(dPr_x_0*dPr_y_0) , 2) + \
+          dPr_x0_y1 * math.log( dPr_x0_y1/(dPr_x_0*dPr_y_1) , 2) + \
+          dPr_x1_y0 * math.log( dPr_x1_y0/(dPr_x_1*dPr_y_0) , 2) + \
+          dPr_x1_y1 * math.log( dPr_x1_y1/(dPr_x_1*dPr_y_1) , 2)
+          
+    return dMI
+        
     
 
 #def computeMI(X,Y,bins):

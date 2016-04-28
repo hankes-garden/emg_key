@@ -291,11 +291,11 @@ def evaluateSpecificDataSet(eng):
     dRectWnd = 2.0
     dSMWnd = 2.0
     dSCWnd = 0.1
-    strCoder = ecc.CODER_GOLAY
-    m = 1
-    n = 23
-    k = 12
-    r = 3
+    strCoder = ecc.CODER_RS
+    m = 4
+    n = 2**m-1
+    k = 3
+    r = 6
     nInterleaving = 25
     print "%s: n=%d, k=%d, m=%d, r=%d, interleave=%d" % \
             (strCoder, n, k, m, r, nInterleaving)
