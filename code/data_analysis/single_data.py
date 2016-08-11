@@ -240,7 +240,7 @@ def evaluateSingleData(strWorkingDir, strFileName,
                        m=4, r=5, n=15, k=5, nInterleaving=20,
                        bSourceEncoding=True, bReconciliation=True,
                        bOutputaData = False, lsOutputData = None,
-                       bPlot=False):
+                       bPlot=False, hKeyOutput = None):
     """
         Given the values of parameters, evaluate the performance of secret key
         generation.
@@ -394,6 +394,12 @@ def evaluateSingleData(strWorkingDir, strFileName,
             arrData_bin_1 = np.copy(lsSourceCode_bin[DATA_ID_USER])
             arrData_bin_1, nPd = ct.interleave(arrData_bin_1,
                                                nInterleaving)
+                                               
+            # write key after interleaving to file
+            if(hKeyOutput is not None):
+                hKeyOutput.write(''.join(str(i) for i in \
+                                     arrData_bin_1) + "\n" )   
+                                     
             arrData_bin_1, nPd = ct.zeroPadding(arrData_bin_1, nPadding)
             arrDelta = ecc.computeDelta(eng, arrData_bin_1, 
                                         n, k, m, strCoder)
@@ -427,9 +433,11 @@ def evaluateSingleData(strWorkingDir, strFileName,
                                    DEDUCED_D1: arrDeduced_bin}
                                                 
             
+
             
             # coding performance    
             for i in [DATA_ID_USER, DATA_ID_ATTACKER]:
+                
                 # before reconciliation
                 arrSrcCode1 = lsSourceCode_bin[i]
                 arrSrcCode2 = lsSourceCode_bin[DATA_ID_PAYEND]
@@ -473,8 +481,6 @@ def evaluateSingleData(strWorkingDir, strFileName,
 #        arrData2 = lsData_rectified[(i+1)%len(lsData_rectified)]
 #        dCorr = stats.pearsonr(arrData1, arrData2)
 #        print dCorr
-    
-    print dcData_stat
                         
     # ---- output data ----    
     if(bOutputaData is True and lsOutputData is not None):
@@ -490,7 +496,7 @@ def evaluateSingleData(strWorkingDir, strFileName,
         strFontName = "Times new Roman"
         
         # plot raw 
-        bPlotRawData = True
+        bPlotRawData = False
         tpYLim_raw = None
         
         # plot fft on raw data
@@ -507,15 +513,15 @@ def evaluateSingleData(strWorkingDir, strFileName,
         
         # plot rectified data based on filtered data
         bPlotRectified = True
-        bPlotAuxiliaryLine = True
-        bPlotShape = True
+        bPlotAuxiliaryLine = False
+        bPlotShape = False
         bAnnotateExtrema = False
         nRectShift = 50
         tpYLim_rectified = None
         
         
         # plot synchronized view
-        bPlotSyncView = False
+        bPlotSyncView = True
         strSyncTitle = "".join([s+"_" for s in lsColumns2Inspect] )
         
         # bAnatation
@@ -642,6 +648,9 @@ def evaluateSingleData(strWorkingDir, strFileName,
                 dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
                 nDataShift = 0 if bPlotSyncView is False else (0*i)
                 nShapeShift = 5 if bPlotSyncView is False else (1*i)
+                arrStd = encoder.findValidIntervals(arrData, dSamplingFreq)
+                
+                axes[nRowID, nColID].plot(arrStd+nDataShift, ls='--')
                 
                 # rectified data
                 axes[nRowID, nColID].plot(arrData+nDataShift,
@@ -708,8 +717,8 @@ if __name__ == '__main__':
         print "matlab engine is already existed."
     
     # setup
-    strWorkingDir = "../../data/raw_data/trash/"
-    strFileName = 'qy_d1_g1_c1_20160329_172116.txt'
+    strWorkingDir = "../../data/evaluation/reconciliation/"
+    strFileName = 'yl_d3_g1_c1_20160324_202337.txt'
     
     strCoder = ecc.CODER_GOLAY
     m = 1    
@@ -723,7 +732,7 @@ if __name__ == '__main__':
     # evaluate
     lsOutput = []                     
     dcDataResult = evaluateSingleData(strWorkingDir, strFileName,
-                      dRectDuration=1.0, dSMDuration=1.0, dSCDuration=0.15,
+                      dRectDuration=1., dSMDuration=1., dSCDuration=0.15,
                       eng=eng, strCoder=strCoder, 
                       m=m, r=r, n=n, k=k, nInterleaving = nInterleaving,
                       bSourceEncoding=True, bReconciliation=True,

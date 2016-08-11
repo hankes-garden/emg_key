@@ -9,6 +9,7 @@ import error_correction_coder as ecc
 from tools import common_function as cf
 import data_tools as dt
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import matlab.engine
@@ -21,6 +22,7 @@ EV_DISTANCE = 'ev_distance'
 EV_ELETRODE_LOC = 'ev_electrode_loc'
 EV_GESTURE = 'ev_gesture'
 EV_MUTUAL_INFO = 'ev_mutual_info'
+EV_RANDOMNESS = 'ev_randomness'
 
 
 def evaluateReconciliationParams(eng):
@@ -50,8 +52,8 @@ def evaluateReconciliationParams(eng):
     
     # parameter    
     strCoder = ecc.CODER_RS
-    lsM = range(4, 8)
-    lsR = range(8, 20)
+    lsM = [4,]
+    lsR = range(1, 7)
     dRectWnd = 2.0
     dSMWnd = 2.0
     dSCWnd = 0.15
@@ -136,7 +138,8 @@ def evaluateDataSet(strLabel, strWorkingDir, lsFilePath,
                     eng=None, strCoder=None, n=23, k=12, m=1, r=3,
                     nInterleaving=25,
                     bSourceEncoding=True, bReconciliation=True,
-                    bOutputData=False, lsOutputData=None):
+                    bOutputData=False, lsOutputData=None,
+                    hKeyOutput = None):
     """
         Given the parameter values, this function evaluates performance
         on a specific data set.
@@ -152,7 +155,8 @@ def evaluateDataSet(strLabel, strWorkingDir, lsFilePath,
                              bSourceEncoding=bSourceEncoding,
                              bReconciliation=bReconciliation,
                              bOutputaData = bOutputData,
-                             lsOutputData = lsOutputData)
+                             lsOutputData = lsOutputData,
+                             hKeyOutput = hKeyOutput)
         lsResult.append(dcDataResult)
     dfResult = pd.DataFrame(lsResult)
     srMean = dfResult.mean()
@@ -290,24 +294,28 @@ def evaluateSpecificDataSet(eng):
     # evaluate data set
     dRectWnd = 2.0
     dSMWnd = 2.0
-    dSCWnd = 0.1
+    dSCWnd = 0.15
     strCoder = ecc.CODER_RS
     m = 4
     n = 2**m-1
-    k = 3
-    r = 6
+    k = 1
+    r = (n-k)/2
     nInterleaving = 25
     print "%s: n=%d, k=%d, m=%d, r=%d, interleave=%d" % \
             (strCoder, n, k, m, r, nInterleaving)
     
     strWorkingDir = "../../data/evaluation/selected_set/"
     lsFilePath = cf.getFileList(strWorkingDir, None)
+    
+    strKeyOutput = "keys"
+    with open(strWorkingDir+strKeyOutput, 'w+') as hFile:
 
-    srMean, srStd, dfDetailed = evaluateDataSet('selected', 
+        srMean, srStd, dfDetailed = evaluateDataSet('selected', 
                                          strWorkingDir, lsFilePath,
                                          dRectWnd, dSMWnd, dSCWnd,
                                          eng, strCoder, n, k, m, r,
-                                         nInterleaving, bOutputData=False)
+                                         nInterleaving, bOutputData=False,
+                                         hKeyOutput=hFile)
     return srMean, srStd, dfDetailed
                                          
 def evaluateMutualInformation():
@@ -335,7 +343,7 @@ if __name__ == '__main__':
     else:
         print "matlab engine is already existed."
     
-    strTarget = EV_SP_SET
+    strTarget = EV_RECONCILIATION
     dfResult = None
     
     if (strTarget == EV_SP_SET): # specific set
@@ -356,7 +364,15 @@ if __name__ == '__main__':
         dfResult = evaluateGesture(eng)
         
     elif (strTarget == EV_RECONCILIATION): # reconciliation
-        pass
+        dfSummary, dfResult = evaluateReconciliationParams(eng)
+        dfSummary.sort('r', ascending=True, inplace=True)
+        plt.plot(dfSummary['r'].values, dfSummary['ber_user_ec'].values,
+                 color='r', marker='o')
+        plt.yticks(np.arange(0.0, 0.12, 0.01) )
+        plt.tight_layout()
+        plt.show()
+        
+        
     elif (strTarget == EV_MUTUAL_INFO): # mutual info.
         dfResult, lsOutput = evaluateMutualInformation()
     else:

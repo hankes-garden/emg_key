@@ -179,7 +179,7 @@ def onDraw(frameNum, dataQueue, nChannels,
                                                          order=nFilterOrder)
             # rectify filtered data
             arrRect = sd.rectifyEMG(arrData_filtered, dSamplingFreq*0.3,
-                                    method=sd.RECTIFY_ARV)
+                                    method=sd.RECTIFY_RMS)
             ax.set_data(range(len(arrRect) ), arrRect)
         
     

@@ -9,6 +9,7 @@ from fastdtw import fastdtw
 import matplotlib.pyplot as plt
 #import frechet_distance as frechet
 import pdb
+import pandas as pd
 
 import numpy as np
 
@@ -17,7 +18,7 @@ FLAT_PATTERN_STD = 0.002
 
 SHAPE_CODE_INCREASE = 1
 SHAPE_CODE_DECREASE = 2
-SHAPE_CODE_FLAT = 0
+SHAPE_CODE_FLAT = 3
 SHAPE_CODE_CONVEX = 4
 SHAPE_CODE_CONCAVE = 5
 
@@ -51,7 +52,7 @@ def generateShapeTemplates(nLen, dRange, dPeakRatio = 1.0):
             SHAPE_CODE_INCREASE: arrIncrease, 
             SHAPE_CODE_DECREASE: arrDecrease}
             
-            
+    
 def shapeEncoding(arrData_raw, nCodingWndSize, nNeighbors=3):
     '''
         souce encoding according to signal shape
