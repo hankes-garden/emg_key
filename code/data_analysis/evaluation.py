@@ -53,7 +53,7 @@ def evaluateReconciliationParams(eng):
     # parameter    
     strCoder = ecc.CODER_RS
     lsM = [4,]
-    lsR = range(1, 7)
+    lsR = range(1, 8)
     dRectWnd = 2.0
     dSMWnd = 2.0
     dSCWnd = 0.15
@@ -70,28 +70,35 @@ def evaluateReconciliationParams(eng):
                 
                 print "testing m=%d, r=%d..." % (m, r)
                 for fn in lsFilePath:
-                    dcDataResult = sd.evaluateSingleData(strWorkingDir, fn,
+                    lsDataResult = sd.evaluateSingleData(strWorkingDir, fn,
                         dRectDuration=dRectWnd, dSMDuration=dSMWnd,
                         dSCDuration=dSCWnd,
                         eng=eng, strCoder=strCoder, n=n, k=k, m=m, r=r)
-                    lsResult.append(dcDataResult)
+                    lsResult.extend(lsDataResult)
     elif strCoder == ecc.CODER_GOLAY:
         n = 23
         k = 12
         m = 1
         r = 2
         for fn in lsFilePath:
-            dcDataResult = sd.evaluateSingleData(strWorkingDir, fn, 
+            lsDataResult = sd.evaluateSingleData(strWorkingDir, fn, 
                 dRectDuration=dRectWnd, dSMDuration=dSMWnd,
                 dSCDuration=dSCWnd,
                 eng=eng, strCoder=strCoder, n=n, k=k, m=m, r=r)
-            lsResult.append(dcDataResult)
+            lsResult.extend(lsDataResult)
 
     # result
     dfResult = pd.DataFrame(lsResult)
-    gp = dfResult.groupby([dfResult[sd.N], dfResult[sd.K]])
-    dfSummary = gp.mean()
-    return dfSummary, dfResult
+    dcMatchingRate = {}
+    for r in lsR:
+        nMatchedKey = (dfResult[sd.ERR_USER_EC][ (dfResult[sd.R]==r) & \
+                        (dfResult[sd.ERR_USER_EC]==0) ]).count()
+        nTotalKey = dfResult[sd.ERR_USER_EC][dfResult[sd.R]==r].count()
+        dMatchingRate = nMatchedKey * 1.0 / nTotalKey
+        dcMatchingRate[r] = dMatchingRate
+    srMatchingRate = pd.Series(dcMatchingRate)
+        
+    return dfSummary, dfResult, srMatchingRate
     
 def evaluateShapeCodingParams(eng):
     """
@@ -120,14 +127,14 @@ def evaluateShapeCodingParams(eng):
     for dCodingWnd in lsSCWnd:
         print "evalauting SCWnd=%.2f..." % dCodingWnd
         for fn in lsFilePath:
-            dcDataResult = sd.evaluateSingleData(strWorkingDir, fn,
+            lsDataResult = sd.evaluateSingleData(strWorkingDir, fn,
                                  dRectDuration = dRectWnd,
                                  dSMDurction = dSMWnd,
                                  dSCDuration = dCodingWnd,
                                  eng=eng, strCoder=strCoder, 
                                  n=n, k=k, m=m, r=r,
                                  nInterleaving=nInterleaving)
-            lsResult.append(dcDataResult)
+            lsResult.extend(lsDataResult)
     dfResult = pd.DataFrame(lsResult)
     gp = dfResult.groupby(dfResult[sd.WND_SC])
     dfMean = gp.mean()
@@ -146,7 +153,7 @@ def evaluateDataSet(strLabel, strWorkingDir, lsFilePath,
     """
     lsResult = []
     for fn in lsFilePath:
-        dcDataResult = sd.evaluateSingleData(strWorkingDir, fn,
+        lsDataResult = sd.evaluateSingleData(strWorkingDir, fn,
                              dRectDuration = dRectDuration,
                              dSCDuration = dSCDuration,
                              dSMDuration = dSMDuration,
@@ -157,7 +164,7 @@ def evaluateDataSet(strLabel, strWorkingDir, lsFilePath,
                              bOutputaData = bOutputData,
                              lsOutputData = lsOutputData,
                              hKeyOutput = hKeyOutput)
-        lsResult.append(dcDataResult)
+        lsResult.extend(lsDataResult)
     dfResult = pd.DataFrame(lsResult)
     srMean = dfResult.mean()
     srMean.name = strLabel+"_mean"
@@ -315,6 +322,7 @@ def evaluateSpecificDataSet(eng):
                                          dRectWnd, dSMWnd, dSCWnd,
                                          eng, strCoder, n, k, m, r,
                                          nInterleaving, bOutputData=False,
+                                         bReconciliation=False,
                                          hKeyOutput=hFile)
     return srMean, srStd, dfDetailed
                                          
@@ -343,7 +351,7 @@ if __name__ == '__main__':
     else:
         print "matlab engine is already existed."
     
-    strTarget = EV_RECONCILIATION
+    strTarget = EV_SP_SET
     dfResult = None
     
     if (strTarget == EV_SP_SET): # specific set
@@ -364,11 +372,8 @@ if __name__ == '__main__':
         dfResult = evaluateGesture(eng)
         
     elif (strTarget == EV_RECONCILIATION): # reconciliation
-        dfSummary, dfResult = evaluateReconciliationParams(eng)
-        dfSummary.sort('r', ascending=True, inplace=True)
-        plt.plot(dfSummary['r'].values, dfSummary['ber_user_ec'].values,
-                 color='r', marker='o')
-        plt.yticks(np.arange(0.0, 0.12, 0.01) )
+        dfSummary, dfResult, srRate = evaluateReconciliationParams(eng)
+        srRate.plot(color='r', marker='o')
         plt.tight_layout()
         plt.show()
         

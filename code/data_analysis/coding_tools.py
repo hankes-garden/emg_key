@@ -63,11 +63,10 @@ def computeBER(arrCode1, arrCode2):
     # convert if it is not binary
     arrCode1_bin = arrCode1
     arrCode2_bin = arrCode2
-    if(max(max(arrCode1), max(arrCode2) ) != 1 or \
-       min(min(arrCode1), min(arrCode2) ) != 0 ):
-        arrCode1_bin = toBinaryArray(arrCode1)
-        arrCode2_bin = toBinaryArray(arrCode2)
-    
+    if(all([v==0 or v==1 for v in arrCode1]) is False):
+        arrCode1_bin = toBinaryArray(arrCode1, 2)
+    if(all([v==0 or v==1 for v in arrCode2]) is False):   
+        arrCode2_bin = toBinaryArray(arrCode2, 2)
         
     nDismatchCount = np.size(arrCode1_bin) - np.sum(arrCode1_bin==arrCode2_bin)
     dBER = nDismatchCount*1.0/np.size(arrCode1_bin)

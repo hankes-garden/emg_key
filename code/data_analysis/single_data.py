@@ -233,87 +233,15 @@ def computeSymbolEntropy(arrCode):
         (srProb.multiply(srProb.apply(math.log, args=(2, ) ) ) ).sum()
     return dEntropy
     
-     
-def evaluateSingleData(strWorkingDir, strFileName,
-                       dRectDuration = 2.0, dSMDuration=2.0, dSCDuration=0.1,
-                       eng=None, strCoder=ecc.CODER_RS, 
-                       m=4, r=5, n=15, k=5, nInterleaving=20,
-                       bSourceEncoding=True, bReconciliation=True,
-                       bOutputaData = False, lsOutputData = None,
-                       bPlot=False, hKeyOutput = None):
-    """
-        Given the values of parameters, evaluate the performance of secret key
-        generation.
-        
-        Parameters:
-        ----------
-        strWorkingDir:
-            data directory
-        strFileName:
-            data file name
-        dRectDuration:
-            the duration of EMG rectification
-        dSMDuration:
-            the duration of smoothing function
-        dSCDuration:
-            the wnd duration of shape coding
-        eng:
-            matlab engine instance
-        strCoder:
-            name of error correction code
-        m:
-            number of bits per symbol (only for RS coder)
-        r:
-            maximal error bits
-        n:
-            length of code word
-        k:
-            length of code
-        bPlot:
-            plot the EMG signal if it is true
-        
-        Returns:
-        ----------
-        dcDataResult:
-            a diction contains evaluate results
-    """
-    # save the param setting
-    dcDataResult = {}
-    dcDataResult[FILE_NAME] = strFileName
-    dcDataResult[M] = m
-    dcDataResult[R] = r
-    dcDataResult[N] = n
-    dcDataResult[K] = k
-    dcDataResult[KN_RATIO] = k*1.0/n
-    dcDataResult[CODER] = strCoder
-    dcDataResult[WND_RECT] = dRectDuration
-    dcDataResult[WND_SM] = dSMDuration
-    dcDataResult[WND_SC] = dSCDuration
-    
-    
-#==============================================================================
-# load data
-#==============================================================================
-    # ---- setup----
-    dSamplingFreq = 240.0
-    lsColumnNames = ['ch0', 'ch1', 'ch2']
-    
-    dfData = loadData(strWorkingDir, strFileName, lsColumnNames)
-    
-    lsColumns2Inspect = ['ch0','ch1', 'ch2']
-    
-#==============================================================================
-# process data
-#==============================================================================
-    # ---- raw ----
-    nRawStart, nRawEnd = 0, -1
-    print "-->%s: [%d:%d]" % (strFileName, nRawStart, nRawEnd)
+def preprocess(dfData, lsColumns2Inspect, nRawStart, nRawEnd,
+               dSamplingFreq, dSMDuration, dRectDuration):
+    # raw
     lsData_raw = []
     for col in lsColumns2Inspect:
         arrData = dfData[col].iloc[nRawStart: nRawEnd]
         lsData_raw.append(arrData)
         
-#    # ---- fft ----
+    # fft 
     nSamples_fft = len(lsData_raw[0])
     dRes_fft = dSamplingFreq*1.0/nSamples_fft
     lsData_fft = []
@@ -322,7 +250,7 @@ def evaluateSingleData(strWorkingDir, strFileName,
         arrPSD = np.sqrt(abs(arrFFT)**2.0/(nSamples_fft*1.0))
         lsData_fft.append(arrPSD)
         
-    # ---- filtered ----
+    # filtered
     nLowCut = 5
     dPowerInterference = 50.0
     nFilterOrder = 9
@@ -352,7 +280,7 @@ def evaluateSingleData(strWorkingDir, strFileName,
 #        arrPSD = np.sqrt(abs(arrFFT)**2.0/(nSamples_fft_filtered*1.0))
 #        lsData_fft_filtered.append(arrPSD)
         
-    # ---- rectify data ----
+    # rectified data
     nSmoothingWnd = int(dSMDuration* dSamplingFreq)
     lsData_rectified = []
     for arrData in lsData_filtered:
@@ -364,106 +292,461 @@ def evaluateSingleData(strWorkingDir, strFileName,
                                      
         lsData_rectified.append(arrRect_sm)
         
-    # ---- coding ----
-    nSCWndSize = int(dSCDuration*dSamplingFreq)
-    lsSourceCode = []               # source code
-    lsSourceCode_bin = []           # source code in binary
-    lsSourceShape = []              # shape of source
-    lsSecretKey = []                # the key after reconciliation
+    return lsData_raw, lsData_fft, lsData_filtered, lsData_rectified
+    
+def plotData(lsData_raw, lsData_fft, lsData_filtered, lsData_rectified, 
+             lsColumns2Inspect, dSamplingFreq,
+             bPlotRawData, bPlotFFT, bPlotFiltered, bPlotRectified,
+             bSourceEncoding=False, nSCWndSize=None, lsSourceShape=None, 
+             bAnatation=False, dcData_stat=None):
+    # look-and-feel
+    nFontSize = 18
+    strFontName = "Times new Roman"
+    
+    # plot raw 
+    bPlotRawData = False
+    tpYLim_raw = None
+    
+    # plot fft on raw data
+    bPlotFFT = False
+    tpYLim_fft = None
+    
+    # plot filtered data
+    bPlotFiltered = False
+    tpYLim_filtered = None
+    
+    # plot fft on filtered data
+    bPlotFFTonFiltered = False
+    tpYLim_fft_filtered = None
+    
+    # plot rectified data based on filtered data
+    bPlotRectified = True
+    bPlotAuxiliaryLine = False
+    bPlotShape = False
+    nRectShift = 50
+    tpYLim_rectified = None
+    
+    
+    # plot synchronized view
+    bPlotSyncView = True
+    strSyncTitle = "".join([s+"_" for s in lsColumns2Inspect] )
+    
+    # bAnatation
+    bAnatation = False
+    tpAnatationXYCoor = (.75, .9)
+    
+    # create axes
+    nRows = np.sum([bPlotRawData, bPlotFFT, bPlotFiltered, 
+                    bPlotFFTonFiltered, bPlotRectified] )
+    nCols= len(lsColumns2Inspect) if bPlotSyncView is False else 1
+    fig, axes = plt.subplots(nrows=nRows, ncols=nCols, squeeze=False)
+    
+    nCurrentRow = 0
+    
+    # ---- plot raw data -----
+    if(bPlotRawData is True):
+        for i, arrData in enumerate(lsData_raw):
+            nRowID = nCurrentRow
+            nColID = i if bPlotSyncView is False else 0
+            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+            nVerticalShift = 0 if bPlotSyncView is False else (100*i)
+            axes[nRowID, nColID].plot((arrData-nVerticalShift).tolist(), 
+                                      color=lsRGB[i], 
+                                      alpha=dAlpha,
+                                      label=lsColumns2Inspect[i])
+            axes[nRowID, nColID].set_xlabel(\
+                (lsColumns2Inspect[i] if bPlotSyncView is False \
+                else  strSyncTitle) + "(raw)", fontname=strFontName,
+                fontsize=nFontSize) 
+            if (tpYLim_raw is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_raw[0], tpYLim_raw[1])
+
+        # decorate the axis  
+        xTickLabels = axes[nRowID, nColID].xaxis.get_ticklabels()
+        plt.setp(xTickLabels, fontname=strFontName,
+                     size=nFontSize)
+        yTickLabels = axes[nRowID, nColID].yaxis.get_ticklabels()
+        plt.setp(yTickLabels, fontname=strFontName,
+                     size=nFontSize)
+            
+        nCurrentRow += 1
+        
+    # ---- plot FFT ----
+    nDCEnd = 10
+    nSamples_fft = len(lsData_raw[0])
+    if (bPlotFFT is True):
+        for i, arrPSD in enumerate(lsData_fft):
+            arrFreqIndex = np.linspace(nDCEnd*dRes_fft, 
+                                       dSamplingFreq/2.0, 
+                                       nSamples_fft/2-nDCEnd)
+                                       
+            nRowID = nCurrentRow
+            nColID = i if bPlotSyncView is False else 0
+            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+            nVerticalShift = 0 if bPlotSyncView is False else (50*i)
+            axes[nRowID, nColID].plot(arrFreqIndex,
+                arrPSD[nDCEnd:nSamples_fft/2]-nVerticalShift,
+                color=lsRGB[i], alpha=dAlpha)
+            axes[nRowID, nColID].set_xticks(range(0, 
+                                            int(dSamplingFreq/2), 10) )
+            axes[nRowID, nColID].set_xlabel( \
+                (lsColumns2Inspect[i]  if bPlotSyncView is False \
+                else strSyncTitle ) +"(fft)" )
+            if (tpYLim_fft is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_fft[0], tpYLim_fft[1])
+            axes[nRowID, nColID].grid('on')
+
+        nCurrentRow += 1
+            
+    # ---- plot filtered data ----
+    if(bPlotFiltered is True):
+        for i, arrFiltered in enumerate(lsData_filtered):
+            nRowID = nCurrentRow
+            nColID = i if bPlotSyncView is False else 0
+            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+            nVerticalShift = 0 if bPlotSyncView is False else (80*i)
+            axes[nRowID, nColID].plot(\
+                arrFiltered-nVerticalShift,
+                color=lsRGB[i], alpha=dAlpha)
+                
+            axes[nRowID, nColID].set_xlabel(\
+                (lsColumns2Inspect[i] if bPlotSyncView is False \
+                else strSyncTitle )  +"(filtered)" )
+            if (tpYLim_filtered is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_filtered[0],
+                                              tpYLim_filtered[1])
+            axes[nRowID, nColID].grid('on')
+        nCurrentRow += 1
+        
+    # ---- plot rectified data ----
+    if(bPlotRectified is True):
+        for i, arrData in enumerate(lsData_rectified):
+            nRowID = nCurrentRow
+            nColID = i if bPlotSyncView is False else 0
+            dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
+            nDataShift = 0 if bPlotSyncView is False else (0*i)
+            nShapeShift = 5 if bPlotSyncView is False else (1*i)
+            
+            # rectified data
+            axes[nRowID, nColID].plot(arrData+nDataShift,
+                                      color=lsRGB[i], lw=3, 
+                                      alpha=dAlpha)
+            # approximating shapes                                      
+            if(bSourceEncoding is True and bPlotShape is True):                          
+                axes[nRowID, nColID].plot(lsSourceShape[i]+nShapeShift,
+                                          color='k',
+                                          lw=1, alpha=dAlpha)
+                                      
+            axes[nRowID, nColID].set_xlabel(\
+                (lsColumns2Inspect[i] if bPlotSyncView is False \
+                else strSyncTitle)  +"(rect)", fontname=strFontName,
+                fontsize=nFontSize)
+                
+
+                 
+            if (tpYLim_rectified is not None):
+                axes[nRowID, nColID].set_ylim(tpYLim_rectified[0],
+                                              tpYLim_rectified[1])
+                
+            # plot auxiliary line
+            if(bPlotAuxiliaryLine is True):
+                #coding wnd line
+                for ln in xrange(0, len(arrData), nSCWndSize):
+                    axes[nRowID, nColID].axvline(ln, color='k', 
+                                                 ls='-.', alpha=0.3)
+            
+            # anatation: stats
+            if(bAnatation is True):
+                strKey = "%d-%d" % (i, (i+1)%len(lsData_rectified) )
+                axes[nRowID, nColID].annotate(\
+                    'corr_%s = %.2f'% (strKey, dcData_stat[strKey]), 
+                    xy= (.3+i*0.2, .95) if bPlotSyncView \
+                        else tpAnatationXYCoor, 
+                    xycoords='axes fraction',
+                    horizontalalignment='center',
+                    verticalalignment='center')
+                    
+            # decorate the axis  
+            xTickLabels = axes[nRowID, nColID].xaxis.get_ticklabels()
+            plt.setp(xTickLabels, fontname=strFontName,
+                     size=nFontSize)
+            yTickLabels = axes[nRowID, nColID].yaxis.get_ticklabels()
+            plt.setp(yTickLabels, fontname=strFontName,
+                     size=nFontSize)
+        nCurrentRow += 1
+
+    fig.suptitle(strFileName, fontname=strFontName, fontsize=nFontSize)
+    plt.tight_layout()
+    plt.show()
+    
+def sourceEncode(lsData_rectified, nSCWndSize, nNeighborWnd=3):
+    """
+        encoding data
+        
+        Parameters:
+        ----------
+        lsData_rectified:
+            list of rectified EMG data
+        nSCWndSize:
+            source coding window size (in points)
+        nNeighborWnd:
+            searching area of nearby neighbors
+            
+        Returns:
+        -------
+        lsSourceCode:
+            list of source code lists
+        lsSourceCode_bin:
+            list of source codes in binary
+        lsSourceShape:
+            list of source approximated shape arrays
+        
+    """
+    
+    lsSourceCode = []
+    lsSourceCode_bin = []
+    lsSourceShape = []
+    for i, arrData in enumerate(lsData_rectified):
+        lsDataSrcCode, arrDataShape = encoder.shapeEncoding(arrData,
+                                                 nSCWndSize, nNeighborWnd)
+        arrDataSrcCode = np.array(lsDataSrcCode)
+        lsSourceCode.append(arrDataSrcCode)
+
+        arrDataSrcCode_bin = ct.toBinaryArray(arrDataSrcCode, 2)
+        lsSourceCode_bin.append(arrDataSrcCode_bin)
+        
+        lsSourceShape.append(arrDataShape)
+        
+        
+    return lsSourceCode, lsSourceCode_bin, lsSourceShape
+
+
+def interleaving(lsSourceCode_bin, nInterleaving):
+    """
+        interleave each data
+        
+        Note:
+        -----
+        To prevent the modification on original data, this function
+        makes a copy of data.
+    """
+    lsSrcCode_bin_interlv = []
+    for arrData in lsSourceCode_bin:
+        arrData_interleaved = np.copy(arrData)
+        arrData_interleaved, nPd = ct.interleave(arrData_interleaved,
+                                             nInterleaving)
+        lsSrcCode_bin_interlv.append(arrData_interleaved)
+    return lsSrcCode_bin_interlv
+   
+def reconciliation(lsSrcCode_bin,
+                   eng,
+                   strCoder, n, k, m):
+    """
+        Perform reconciliation
+    """
+    dcReconciliation = {}
+ 
+    # compute delta                         
+    arrData_bin_user = lsSrcCode_bin[DATA_ID_USER]
+    nPadding = n*m if strCoder==ecc.CODER_RS else n
+    arrData_bin_user, nPd = ct.zeroPadding(arrData_bin_user, nPadding)
+    arrDelta = ecc.computeDelta(eng, arrData_bin_user, 
+                                n, k, m, strCoder)
+                                
+    # reconciliation btw user & payend
+    arrData_bin_payend = lsSrcCode_bin[DATA_ID_PAYEND]
+    arrData_bin_payend, nPd = ct.zeroPadding(arrData_bin_payend, nPadding)
+    
+    arrDeduced_bin_user_payend = ecc.reconciliate(eng, arrDelta,
+                                      arrData_bin_payend,
+                                      n, k, m, strCoder)
+        
+    dcReconciliation[DATA_ID_USER] = {DATA_1: arrData_bin_user, 
+                           DATA_2: arrData_bin_payend,
+                           DEDUCED_D1: arrDeduced_bin_user_payend}
+                           
+    # reconciliation btw attacker & payend
+    arrData_bin_attacker = lsSrcCode_bin[DATA_ID_ATTACKER]
+    arrData_bin_attacker, nPd = ct.zeroPadding(arrData_bin_attacker, nPadding)
+    
+    arrDeduced_bin_user_attacker = ecc.reconciliate(eng, arrDelta,
+                                      arrData_bin_attacker,
+                                      n, k, m, strCoder)
+        
+    dcReconciliation[DATA_ID_ATTACKER] = {DATA_1: arrData_bin_user, 
+                           DATA_2: arrData_bin_attacker,
+                           DEDUCED_D1: arrDeduced_bin_user_attacker}
+                           
+    return dcReconciliation
+    
+def evaluateReconciliation(lsSrcCode_bin_key, dcReconciliation):
+    """
+        Evaluate the performance of reconciliation
+    """
+    dcPerformance = {}    
+    for i in [DATA_ID_USER, DATA_ID_ATTACKER]:
+        # before reconciliation
+        arrSrcCode1 = lsSrcCode_bin_key[i]
+        arrSrcCode2 = lsSrcCode_bin_key[DATA_ID_PAYEND]
+        nErrorBits_src, dBER_src =ct.computeBER(arrSrcCode1,
+                                                arrSrcCode2)
+        # after reconciliation
+        arrData_bin_1 = dcReconciliation[i][DATA_1]
+        arrDeduced_1 = dcReconciliation[i][DEDUCED_D1]
+
+        nErrorBit_ec, dBER_ec =ct.computeBER(arrData_bin_1,
+                                             arrDeduced_1)
+                                             
+        if(i == DATA_ID_USER):
+            dcPerformance[BER_USER_SRC] = dBER_src
+            dcPerformance[BER_USER_EC] = dBER_ec
+            dcPerformance[ERR_USER_SRC] = nErrorBits_src
+            dcPerformance[ERR_USER_EC] = nErrorBit_ec
+        elif (i == DATA_ID_ATTACKER):
+            dcPerformance[BER_ATTACKER_SRC] = dBER_src
+            dcPerformance[BER_ATTACKER_EC] = dBER_ec
+            dcPerformance[ERR_ATTACKER_SRC] = nErrorBits_src
+            dcPerformance[ERR_ATTACKER_EC] = nErrorBit_ec
+        else:
+            raise ValueError("Unknown data id: %d" % i)
+            
+    return dcPerformance
+    
+     
+def evaluateSingleData(strWorkingDir, strFileName,
+                       dRectDuration = 2.0, dSMDuration=2.0, dSCDuration=0.1,
+                       eng=None, strCoder=ecc.CODER_RS, 
+                       m=4, r=5, n=15, k=5, nInterleaving=20,
+                       bSourceEncoding=True, bReconciliation=True,
+                       bOutputaData = False, lsOutputData = None,
+                       bPlot=False, hKeyOutput = None):
+    """
+        Given the values of parameters, divide the generated sequence into 
+        keys, and evaluate the performance of EMG-KEY.
+        
+        Parameters:
+        ----------
+        strWorkingDir:
+            data directory
+        strFileName:
+            data file name
+        dRectDuration:
+            the duration of EMG rectification
+        dSMDuration:
+            the duration of smoothing function
+        dSCDuration:
+            the wnd duration of shape coding
+        eng:
+            matlab engine instance
+        strCoder:
+            name of error correction code
+        m:
+            number of bits per symbol (only for RS coder)
+        r:
+            maximal error bits
+        n:
+            length of code word
+        k:
+            length of code
+        bPlot:
+            plot the EMG signal if it is true
+        hKeyOutput:
+            file handle for outputing keys
+        
+        Returns:
+        ----------
+        lsResult:
+            a list of dictions that contains evaluation results
+    """
+    dSamplingFreq = 240.0
+    lsColumnNames = ['ch0', 'ch1', 'ch2']
+    lsColumns2Inspect = ['ch0','ch1', 'ch2']
+    
+    # load data 
+    dfData = loadData(strWorkingDir, strFileName, lsColumnNames)
+    
+    # process data
+    nRawStart, nRawEnd = 0, -1
+    lsData_raw, lsData_fft, \
+        lsData_filtered, lsData_rectified = preprocess(dfData,
+                                                       lsColumns2Inspect,
+                                                       nRawStart,
+                                                       nRawEnd,
+                                                       dSamplingFreq, 
+                                                       dSMDuration, 
+                                                       dRectDuration)
+        
+    nSCWndSize = int(dSCDuration*dSamplingFreq) # src coding wnd size
+    lsSourceCode = None        # source code
+    lsSourceCode_bin = None    # source code in binary
+    lsSourceShape = None       # shape of source
+    
     if(bSourceEncoding):
         # source encoding
-        nNeighborWnd = 3
-        for i, arrData in enumerate(lsData_rectified):
-            lsDataSrcCode, arrDataShape = encoder.shapeEncoding(arrData,
-                                                     nSCWndSize, nNeighborWnd)
-            arrDataSrcCode = np.array(lsDataSrcCode)
-            lsSourceCode.append(arrDataSrcCode)
-            dEntropy = computeSymbolEntropy(arrDataSrcCode)
-            dcDataResult[ENTROPY] = dEntropy
-            arrDataSrcCode_bin = ct.toBinaryArray(arrDataSrcCode, 2)
-            lsSourceCode_bin.append(arrDataSrcCode_bin)
-            lsSourceShape.append(arrDataShape)
-            dcDataResult[CODE_LEN_SRC] = len(arrDataSrcCode_bin)
-            
-        # reconciliation
-        dcReconciliation = {}
-        if(bReconciliation):
-            nPadding = n*m if strCoder==ecc.CODER_RS else n
- 
-            # compute the delta
-            arrData_bin_1 = np.copy(lsSourceCode_bin[DATA_ID_USER])
-            arrData_bin_1, nPd = ct.interleave(arrData_bin_1,
-                                               nInterleaving)
-                                               
-            # write key after interleaving to file
-            if(hKeyOutput is not None):
-                hKeyOutput.write(''.join(str(i) for i in \
-                                     arrData_bin_1) + "\n" )   
-                                     
-            arrData_bin_1, nPd = ct.zeroPadding(arrData_bin_1, nPadding)
-            arrDelta = ecc.computeDelta(eng, arrData_bin_1, 
-                                        n, k, m, strCoder)
-                                        
-            # reconciliation for user
-            arrData_bin_2 = np.copy(lsSourceCode_bin[DATA_ID_PAYEND])
-            arrData_bin_2, nPd = ct.interleave(arrData_bin_2, 
-                                               nInterleaving)
-            arrData_bin_2, nPd = ct.zeroPadding(arrData_bin_2, nPadding)
-            
-            arrDeduced_bin = ecc.reconciliate(eng, arrDelta,
-                                              arrData_bin_2,
-                                              n, k, m, strCoder)
-                
-            dcReconciliation[DATA_ID_USER] = {DATA_1: arrData_bin_1, 
-                                   DATA_2: arrData_bin_2,
-                                   DEDUCED_D1: arrDeduced_bin}
-                                   
-            # reconciliation for attacker
-            arrData_bin_2 = np.copy(lsSourceCode_bin[DATA_ID_ATTACKER])
-            arrData_bin_2, nPd = ct.interleave(arrData_bin_2, 
-                                               nInterleaving)
-            arrData_bin_2, nPd = ct.zeroPadding(arrData_bin_2, nPadding)
-            
-            arrDeduced_bin = ecc.reconciliate(eng, arrDelta,
-                                              arrData_bin_2,
-                                              n, k, m, strCoder)
-                
-            dcReconciliation[DATA_ID_ATTACKER] = {DATA_1: arrData_bin_1, 
-                                   DATA_2: arrData_bin_2,
-                                   DEDUCED_D1: arrDeduced_bin}
-                                                
-            
-
-            
-            # coding performance    
-            for i in [DATA_ID_USER, DATA_ID_ATTACKER]:
-                
-                # before reconciliation
-                arrSrcCode1 = lsSourceCode_bin[i]
-                arrSrcCode2 = lsSourceCode_bin[DATA_ID_PAYEND]
-                nErrorBits_src, dBER_src =ct.computeBER(arrSrcCode1,
-                                                        arrSrcCode2)
-                # after reconciliation
-                arrData_bin_1 = dcReconciliation[i][DATA_1]
-                arrDeduced_1 = dcReconciliation[i][DEDUCED_D1]
+        lsSourceCode, lsSourceCode_bin, \
+            lsSourceShape = sourceEncode(lsData_rectified, nSCWndSize)
         
-                nErrorBit_ec, dBER_ec =ct.computeBER(arrData_bin_1,
-                                                            arrDeduced_1)
-                dcDataResult[CODE_LEN_EC] = len(arrDeduced_1)
-                if(i == DATA_ID_USER):
-                    dcDataResult[BER_USER_SRC] = dBER_src
-                    dcDataResult[BER_USER_EC] = dBER_ec
-                    dcDataResult[ERR_USER_SRC] = nErrorBits_src
-                    dcDataResult[ERR_USER_EC] = nErrorBit_ec
-                elif (i == DATA_ID_ATTACKER):
-                    dcDataResult[BER_ATTACKER_SRC] = dBER_src
-                    dcDataResult[BER_ATTACKER_EC] = dBER_ec
-                    dcDataResult[ERR_ATTACKER_SRC] = nErrorBits_src
-                    dcDataResult[ERR_ATTACKER_EC] = nErrorBit_ec
-                else:
-                    raise ValueError("Unknown data id: %d" % i)
+        # compute entropy (only need entropy of user data)
+        dSymbolEntropy = computeSymbolEntropy(lsSourceCode[DATA_ID_USER])    
+                                    
+        # interleaving            
+        lsSrcCode_bin_interlv = interleaving(lsSourceCode_bin,
+                                             nInterleaving)
+        
+        # write user's interleaved key to file
+        if(hKeyOutput is not None):
+            hKeyOutput.write(''.join(str(i) for i in \
+                lsSrcCode_bin_interlv[DATA_ID_USER]) + "\n" )   
+                
+        lsResult = []
+        if(bReconciliation):
+            nKeySize = 60
+            for i, nKeyStart in enumerate(range(0, len(lsSourceCode_bin[0]),\
+                                                nKeySize) ):
+                nKeyEnd = nKeyStart+nKeySize
+                if nKeyEnd > len(lsSourceCode_bin[0]):
+                    break
+                
+                # use part of sequence as key
+                lsSrcCode_bin_key = [arrData[nKeyStart:nKeyEnd] \
+                                        for arrData in lsSourceCode_bin]
+                                            
+                # prepare result dict
+                dcKeyResult = {}
+                dcKeyResult[FILE_NAME] = strFileName + '_k%d' % i
+                dcKeyResult[M] = m
+                dcKeyResult[R] = r
+                dcKeyResult[N] = n
+                dcKeyResult[K] = k
+                dcKeyResult[KN_RATIO] = k*1.0/n
+                dcKeyResult[CODER] = strCoder
+                dcKeyResult[WND_RECT] = dRectDuration
+                dcKeyResult[WND_SM] = dSMDuration
+                dcKeyResult[WND_SC] = dSCDuration    
+                dcKeyResult[ENTROPY] = dSymbolEntropy
+                                            
+                print "-->%s_%d_%d" % (strFileName, nKeyStart, nKeyEnd)
+                
+                # reconciliation
+                dcReconciliation = reconciliation(lsSrcCode_bin_key,
+                                                  eng,
+                                                  strCoder, n, k, m)
+                                                  
+                           
+                # evaluate reconciliation
+                dcKeyResult[CODE_LEN_SRC] = len(lsSrcCode_bin_key[0])
+                dcKeyResult[CODE_LEN_EC] = len(\
+                    dcReconciliation[DATA_ID_USER][DATA_1])
+                dcPerformance = evaluateReconciliation(lsSrcCode_bin_key,
+                                                       dcReconciliation)
+                for key, val in dcPerformance.iteritems():
+                    dcKeyResult[key] = val
+                
+                # append to result
+                lsResult.append(dcKeyResult)
+                                                   
                     
-    # ---- statistics of data ----
+    # compute mutual info.
     dcData_stat = {}
     for i in xrange(len(lsData_filtered)):
         arrCode1 = lsData_filtered[i]
@@ -471,241 +754,23 @@ def evaluateSingleData(strWorkingDir, strFileName,
         dMI = dt.computeMI(arrCode1, arrCode2, 200)
         dcData_stat["%d-%d" % (i, (i+1)%len(lsData_filtered)) ] = dMI
 
-#    for i in xrange(len(lsSourceCode_bin)):
-#        arrCode1 = lsSourceCode_bin[i]
-#        arrCode2 = lsSourceCode_bin[(i+1)%len(lsSourceCode)]
-#        dMI = dt.computeMutualInfo(arrCode1, arrCode2)
-#        dcData_stat["%d-%d" % (i, (i+1)%len(lsSourceCode)) ] = dMI
-        
-#        arrData1 = lsData_rectified[i]
-#        arrData2 = lsData_rectified[(i+1)%len(lsData_rectified)]
-#        dCorr = stats.pearsonr(arrData1, arrData2)
-#        print dCorr
                         
-    # ---- output data ----    
+    # prepare output data    
     if(bOutputaData is True and lsOutputData is not None):
         dfOutput = pd.DataFrame(lsData_rectified).T
         lsOutputData.append(dfOutput)
         
-#==============================================================================
-# plot
-#==============================================================================
-    if (bPlot):
-        # look-and-feel
-        nFontSize = 18
-        strFontName = "Times new Roman"
-        
-        # plot raw 
-        bPlotRawData = False
-        tpYLim_raw = None
-        
-        # plot fft on raw data
-        bPlotFFT = False
-        tpYLim_fft = None
-        
-        # plot filtered data
-        bPlotFiltered = False
-        tpYLim_filtered = None
-        
-        # plot fft on filtered data
-        bPlotFFTonFiltered = False
-        tpYLim_fft_filtered = None
-        
-        # plot rectified data based on filtered data
-        bPlotRectified = True
-        bPlotAuxiliaryLine = False
-        bPlotShape = False
-        bAnnotateExtrema = False
-        nRectShift = 50
-        tpYLim_rectified = None
-        
-        
-        # plot synchronized view
-        bPlotSyncView = True
-        strSyncTitle = "".join([s+"_" for s in lsColumns2Inspect] )
-        
-        # bAnatation
-        bAnatation = False
-        tpAnatationXYCoor = (.75, .9)
-        
-        # create axes
-        nRows = np.sum([bPlotRawData, bPlotFFT, bPlotFiltered, 
-                        bPlotFFTonFiltered, bPlotRectified] )
-        nCols= len(lsColumns2Inspect) if bPlotSyncView is False else 1
-        fig, axes = plt.subplots(nrows=nRows, ncols=nCols, squeeze=False)
-        
-        nCurrentRow = 0
-        
-        # ---- plot raw data -----
-        if(bPlotRawData is True):
-            for i, arrData in enumerate(lsData_raw):
-                nRowID = nCurrentRow
-                nColID = i if bPlotSyncView is False else 0
-                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-                nVerticalShift = 0 if bPlotSyncView is False else (100*i)
-                axes[nRowID, nColID].plot((arrData-nVerticalShift).tolist(), 
-                                          color=lsRGB[i], 
-                                          alpha=dAlpha,
-                                          label=lsColumns2Inspect[i])
-                axes[nRowID, nColID].set_xlabel(\
-                    (lsColumns2Inspect[i] if bPlotSyncView is False \
-                    else  strSyncTitle) + "(raw)", fontname=strFontName,
-                    fontsize=nFontSize) 
-                if (tpYLim_raw is not None):
-                    axes[nRowID, nColID].set_ylim(tpYLim_raw[0], tpYLim_raw[1])
+    # plot
+    if(bPlot is True):
+        plotData(lsData_raw, lsData_fft, lsData_filtered, lsData_rectified,
+                 lsColumns2Inspect, dSamplingFreq, 
+                 bPlotRawData=False, bPlotFFT=False, bPlotFiltered=False, 
+                 bPlotRectified=True, 
+                 bSourceEncoding=True, nSCWndSize=nSCWndSize,
+                 lsSourceShape=lsSourceShape, bAnatation=False)
 
-            # decorate the axis  
-            xTickLabels = axes[nRowID, nColID].xaxis.get_ticklabels()
-            plt.setp(xTickLabels, fontname=strFontName,
-                         size=nFontSize)
-            yTickLabels = axes[nRowID, nColID].yaxis.get_ticklabels()
-            plt.setp(yTickLabels, fontname=strFontName,
-                         size=nFontSize)
-                
-            nCurrentRow += 1
-            
-        # ---- plot FFT ----
-        nDCEnd = 10
-        if (bPlotFFT is True):
-            for i, arrPSD in enumerate(lsData_fft):
-                arrFreqIndex = np.linspace(nDCEnd*dRes_fft, 
-                                           dSamplingFreq/2.0, 
-                                           nSamples_fft/2-nDCEnd)
-                                           
-                nRowID = nCurrentRow
-                nColID = i if bPlotSyncView is False else 0
-                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-                nVerticalShift = 0 if bPlotSyncView is False else (50*i)
-                axes[nRowID, nColID].plot(arrFreqIndex,
-                    arrPSD[nDCEnd:nSamples_fft/2]-nVerticalShift,
-                    color=lsRGB[i], alpha=dAlpha)
-                axes[nRowID, nColID].set_xticks(range(0, 
-                                                int(dSamplingFreq/2), 10) )
-                axes[nRowID, nColID].set_xlabel( \
-                    (lsColumns2Inspect[i]  if bPlotSyncView is False \
-                    else strSyncTitle ) +"(fft)" )
-                if (tpYLim_fft is not None):
-                    axes[nRowID, nColID].set_ylim(tpYLim_fft[0], tpYLim_fft[1])
-                axes[nRowID, nColID].grid('on')
-    
-            nCurrentRow += 1
-                
-        # ---- plot filtered data ----
-        if(bPlotFiltered is True):
-            for i, arrFiltered in enumerate(lsData_filtered):
-                nRowID = nCurrentRow
-                nColID = i if bPlotSyncView is False else 0
-                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-                nVerticalShift = 0 if bPlotSyncView is False else (80*i)
-                axes[nRowID, nColID].plot(\
-                    arrFiltered-nVerticalShift,
-                    color=lsRGB[i], alpha=dAlpha)
-                    
-                axes[nRowID, nColID].set_xlabel(\
-                    (lsColumns2Inspect[i] if bPlotSyncView is False \
-                    else strSyncTitle )  +"(filtered)" )
-                if (tpYLim_filtered is not None):
-                    axes[nRowID, nColID].set_ylim(tpYLim_filtered[0],
-                                                  tpYLim_filtered[1])
-                axes[nRowID, nColID].grid('on')
-            nCurrentRow += 1
-            
-#        # ---- plot FFT on filtered data ----
-#        if (bPlotFFTonFiltered is True):
-#            for i, arrPSD in enumerate(lsData_fft_filtered):
-#                arrFreqIndex = np.linspace(nDCEnd*dRes_fft_filtered, 
-#                                           dSamplingFreq/2.0, 
-#                                           nSamples_fft_filtered/2-nDCEnd)
-#                                           
-#                nRowID = nCurrentRow
-#                nColID = i if bPlotSyncView is False else 0
-#                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-#                nVerticalShift = 0 if bPlotSyncView is False else (30*i)
-#                
-#                axes[nRowID, nColID].plot(arrFreqIndex,
-#                    pd.rolling_mean(\
-#                        arrPSD[nDCEnd: int(nSamples_fft_filtered/2.0)] \
-#                        -nVerticalShift, window=40, min_periods=1),
-#                    color=lsRGB[i], alpha=dAlpha)
-#                    
-#                axes[nRowID, nColID].set_xticks(range(0, 
-#                                                int(dSamplingFreq/2), 10) )
-#                axes[nRowID, nColID].set_xlabel( \
-#                    (lsColumns2Inspect[i]  if bPlotSyncView is False \
-#                    else strSyncTitle ) +"(fft@filtered)")
-#                if (tpYLim_fft_filtered is not None):
-#                    axes[nRowID, nColID].set_ylim(tpYLim_fft_filtered[0], 
-#                                                  tpYLim_fft_filtered[1])
-#                axes[nRowID, nColID].grid('on')
-#            nCurrentRow += 1
         
-        
-        # ---- plot rectified data ----
-        if(bPlotRectified is True):
-            for i, arrData in enumerate(lsData_rectified):
-                nRowID = nCurrentRow
-                nColID = i if bPlotSyncView is False else 0
-                dAlpha = 1.0 if bPlotSyncView is False else (1.0-i*0.3)
-                nDataShift = 0 if bPlotSyncView is False else (0*i)
-                nShapeShift = 5 if bPlotSyncView is False else (1*i)
-                arrStd = encoder.findValidIntervals(arrData, dSamplingFreq)
-                
-                axes[nRowID, nColID].plot(arrStd+nDataShift, ls='--')
-                
-                # rectified data
-                axes[nRowID, nColID].plot(arrData+nDataShift,
-                                          color=lsRGB[i], lw=3, 
-                                          alpha=dAlpha)
-                # approximating shapes                                      
-                if(bSourceEncoding is True and bPlotShape is True):                          
-                    axes[nRowID, nColID].plot(lsSourceShape[i]+nShapeShift,
-                                              color='k',
-                                              lw=1, alpha=dAlpha)
-                                          
-                axes[nRowID, nColID].set_xlabel(\
-                    (lsColumns2Inspect[i] if bPlotSyncView is False \
-                    else strSyncTitle)  +"(rect)", fontname=strFontName,
-                    fontsize=nFontSize)
-                    
-
-                     
-                if (tpYLim_rectified is not None):
-                    axes[nRowID, nColID].set_ylim(tpYLim_rectified[0],
-                                                  tpYLim_rectified[1])
-                    
-                # plot auxiliary line
-                if(bPlotAuxiliaryLine is True):
-                    #coding wnd line
-                    for ln in xrange(0, len(arrData), nSCWndSize):
-                        axes[nRowID, nColID].axvline(ln, color='k', 
-                                                     ls='-.', alpha=0.3)
-                
-                # anatation: stats
-                if(bAnatation is True):
-                    strKey = "%d-%d" % (i, (i+1)%len(lsData_rectified) )
-                    axes[nRowID, nColID].annotate(\
-                        'corr_%s = %.2f'% (strKey, dcData_stat[strKey]), 
-                        xy= (.3+i*0.2, .95) if bPlotSyncView \
-                            else tpAnatationXYCoor, 
-                        xycoords='axes fraction',
-                        horizontalalignment='center',
-                        verticalalignment='center')
-                        
-                # decorate the axis  
-                xTickLabels = axes[nRowID, nColID].xaxis.get_ticklabels()
-                plt.setp(xTickLabels, fontname=strFontName,
-                         size=nFontSize)
-                yTickLabels = axes[nRowID, nColID].yaxis.get_ticklabels()
-                plt.setp(yTickLabels, fontname=strFontName,
-                         size=nFontSize)
-            nCurrentRow += 1
-            
-    
-#        fig.suptitle(strFileName, fontname=strFontName, fontsize=nFontSize)
-        plt.tight_layout()
-        plt.show()
-        
-    return dcDataResult
+    return lsResult
         
     
     
@@ -718,20 +783,20 @@ if __name__ == '__main__':
     
     # setup
     strWorkingDir = "../../data/evaluation/reconciliation/"
-    strFileName = 'yl_d3_g1_c1_20160324_202337.txt'
+    strFileName = 'yl_d1_g1_c1_20160324_151412.txt'
     
-    strCoder = ecc.CODER_GOLAY
-    m = 1    
-    n = 23
-    k = 12
+    strCoder = ecc.CODER_RS
+    m = 4
+    n = 2**m-1
+    k = 11
     r = int(math.floor((n-k)/2.0) )
     nInterleaving = 25
-    print "%s: n=%d, k=%d, m=%d, r=%d, interlv=%d" % \
+    print "Coder=%s, n=%d, k=%d, m=%d, r=%d, interlv=%d" % \
             (strCoder, n, k, m, r, nInterleaving)
     
     # evaluate
     lsOutput = []                     
-    dcDataResult = evaluateSingleData(strWorkingDir, strFileName,
+    lsResult = evaluateSingleData(strWorkingDir, strFileName,
                       dRectDuration=1., dSMDuration=1., dSCDuration=0.15,
                       eng=eng, strCoder=strCoder, 
                       m=m, r=r, n=n, k=k, nInterleaving = nInterleaving,
@@ -740,6 +805,7 @@ if __name__ == '__main__':
                       bPlot=True)
     
        
-    print pd.Series(dcDataResult)
+    dfResult = pd.DataFrame(lsResult)
+    print "Evaluation on single data is finished."
     
     
